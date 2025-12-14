@@ -59,7 +59,7 @@ export class NodeWireManager {
         method: string,
         state: Record<string, any>,
         viewsPath?: string
-    ): Promise<{ success: boolean; html?: string; error?: string; newState?: Record<string, any> }> {
+    ): Promise<{ success: boolean; html?: string; error?: string; newState?: Record<string, any>; updates?: Record<string, any> }> {
         try {
             const effectiveViewsPath = viewsPath || this.viewsPath;
             
@@ -79,6 +79,9 @@ export class NodeWireManager {
                 this.components.set(id, component);
             }
 
+            // Guardar el estado anterior para detectar cambios
+            const oldState = JSON.parse(JSON.stringify(component.getState()));
+
             // Restaurar el estado del componente
             component.setState(state);
 
@@ -89,16 +92,35 @@ export class NodeWireManager {
 
             await (component as any)[method]();
 
-            // Renderizar el componente actualizado
-            const html = component.render(this.getTemplateEngine(effectiveViewsPath));
-
             // Obtener el nuevo estado
             const newState = component.getState();
+
+            // Detectar qué propiedades cambiaron (usando comparación profunda)
+            const updates: Record<string, any> = {};
+            for (const key in newState) {
+                const oldValue = oldState[key];
+                const newValue = newState[key];
+                // Comparar usando JSON para manejar objetos y arrays
+                if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+                    updates[key] = newValue;
+                }
+            }
+
+            console.log('[NodeWire] Estado actualizado:', {
+                oldState,
+                newState,
+                updates,
+                componentId: id
+            });
+
+            // Renderizar el componente actualizado
+            const html = component.render(this.getTemplateEngine(effectiveViewsPath));
 
             return {
                 success: true,
                 html,
-                newState
+                newState,
+                updates // Propiedades que cambiaron
             };
         } catch (error: any) {
             console.error('Error en handleComponentCall:', error);
@@ -133,21 +155,59 @@ export class NodeWireManager {
                     const templateContent = fs.readFileSync(templatePath, 'utf8');
                     
                     // Agregar helpers para NodeWire
+                    const component = data.component;
                     const helpers = {
-                        nodewireState: (component: any) => {
-                            return `<script type="application/json" data-nodewire-state="${component.id}" data-component-name="${component.name}">${JSON.stringify(component.getState())}</script>`;
+                        nodewireState: (comp: any) => {
+                            return `<script type="application/json" data-nodewire-state="${comp.id}" data-component-name="${comp.name}">${JSON.stringify(comp.getState())}</script>`;
                         },
-                        nodewireId: (component: any) => {
-                            return component.id;
+                        nodewireId: (comp: any) => {
+                            return comp.id;
                         },
-                        nodewireComponent: (component: any) => {
-                            return component.name;
+                        nodewireComponent: (comp: any) => {
+                            return comp.name;
+                        },
+                        // Helper para marcar automáticamente elementos con propiedades del componente
+                        wire: (prop: string, content: any) => {
+                            if (!component) {
+                                console.warn('[NodeWire] wire() llamado sin componente disponible');
+                                return String(content || '');
+                            }
+                            const contentStr = String(content || '');
+                            const html = `<span data-nodewire-id="${component.id}" data-nodewire-prop="${prop}">${contentStr}</span>`;
+                            console.log(`[NodeWire] wire() generado para prop "${prop}":`, html);
+                            return html;
                         }
                     };
                     
-                    return ejs.render(templateContent, { ...data, ...helpers });
+                    let html = ejs.render(templateContent, { ...data, ...helpers });
+                    
+                    // Post-procesar el HTML para marcar automáticamente elementos que contienen component.propiedad
+                    if (component) {
+                        html = this.autoMarkComponentProperties(html, component);
+                    }
+                    
+                    return html;
                 }
             };
+    }
+
+    /**
+     * Marca automáticamente los elementos que contienen propiedades del componente
+     * Busca elementos que contengan valores del componente y los marca automáticamente
+     */
+    private autoMarkComponentProperties(html: string, component: Component): string {
+        const state = component.getState();
+        const componentId = component.id;
+        
+        // Usar una expresión regular para encontrar elementos que podrían contener propiedades
+        // Esto es una aproximación - en la práctica, es mejor usar el helper wire() en las plantillas
+        // Pero podemos intentar marcar elementos que contienen valores conocidos
+        
+        // Por ahora, retornamos el HTML sin modificar
+        // El desarrollador debe usar el helper wire() o data-attributes manualmente
+        // O podemos implementar un sistema más sofisticado de análisis de DOM
+        
+        return html;
     }
 
     /**
@@ -158,4 +218,3 @@ export class NodeWireManager {
         // Por ahora, mantenemos todos los componentes en memoria
     }
 }
-
