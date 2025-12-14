@@ -202,7 +202,7 @@ export class NodeWireManager {
     /**
      * Obtiene el motor de plantillas Handlebars configurado
      */
-    private getTemplateEngine(viewsPath?: string): any {
+    public getTemplateEngine(viewsPath?: string): any {
         const effectiveViewsPath = viewsPath || this.viewsPath;
         
         // Registrar helpers de Handlebars
@@ -276,7 +276,8 @@ export class NodeWireManager {
                     }
                 }
                 
-                return html;
+                // Asegurar que siempre devolvamos un string
+                return typeof html === 'string' ? html : String(html || '');
             }
         };
     }
@@ -358,6 +359,59 @@ export class NodeWireManager {
                 
                 return match;
             });
+        }
+        
+        // También marcar botones con data-nw-click que estén dentro del componente
+        // Buscar el script de estado del componente usando regex
+        const stateScriptRegex = new RegExp(
+            `<script[^>]*data-nodewire-state="${this.escapeRegex(componentId)}"[^>]*>`,
+            'i'
+        );
+        const stateScriptMatch = stateScriptRegex.exec(html);
+        
+        if (stateScriptMatch) {
+            const stateScriptIndex = stateScriptMatch.index;
+            
+            // Buscar el cierre del script de estado
+            const scriptCloseIndex = html.indexOf('</script>', stateScriptIndex);
+            if (scriptCloseIndex !== -1) {
+                // Buscar el siguiente script de estado (de otro componente) o el final del HTML
+                const nextStateScriptRegex = /<script[^>]*data-nodewire-state="[^"]*"[^>]*>/gi;
+                nextStateScriptRegex.lastIndex = scriptCloseIndex + 9;
+                const nextMatch = nextStateScriptRegex.exec(html);
+                const sectionEnd = nextMatch ? nextMatch.index : html.length;
+                
+                // Extraer la sección del componente (desde después del script hasta el siguiente script o final)
+                const componentSection = html.substring(scriptCloseIndex + 9, sectionEnd);
+                
+                // Buscar botones con data-nw-click que no tengan data-nodewire-id
+                const buttonRegex = /(<button[^>]*data-nw-click[^>]*)(?![^>]*data-nodewire-id)([^>]*>)/gi;
+                const buttonMatches: Array<{match: string, index: number}> = [];
+                
+                let match;
+                while ((match = buttonRegex.exec(componentSection)) !== null) {
+                    buttonMatches.push({
+                        match: match[0],
+                        index: scriptCloseIndex + 9 + match.index
+                    });
+                }
+                
+                // Reemplazar los botones de atrás hacia adelante para mantener los índices correctos
+                for (let i = buttonMatches.length - 1; i >= 0; i--) {
+                    const buttonMatch = buttonMatches[i];
+                    const newButton = buttonMatch.match.replace(
+                        />/,
+                        ` data-nodewire-id="${componentId}" data-nodewire-component="${component.name}">`
+                    );
+                    
+                    html = html.substring(0, buttonMatch.index) + 
+                           newButton + 
+                           html.substring(buttonMatch.index + buttonMatch.match.length);
+                    
+                    console.log(`[NodeWire] ✅ Marcando botón con data-nw-click para componente ${component.name}`);
+                    markedCount++;
+                }
+            }
         }
         
         console.log(`[NodeWire] Total de elementos marcados: ${markedCount}`);

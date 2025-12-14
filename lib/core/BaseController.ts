@@ -124,12 +124,40 @@ export abstract class BaseController {
 
     /**
      * Renderiza una vista
+     * @param view Nombre de la vista a renderizar
+     * @param data Datos a pasar a la vista
+     * @param options Opciones adicionales:
+     *   - layout: Nombre del layout a usar (ej: 'app', 'admin')
+     *   - sections: Objeto con secciones personalizadas del layout. 
+     *     Cada sección puede ser un componente NodeWire o una ruta de vista.
+     *     Ejemplo: { sidebar: myComponent, header: 'partials/header', footer: footerComponent }
      */
-    protected render(view: string, data: any = {}): void {
+    protected render(
+        view: string, 
+        data: any = {}, 
+        options?: { 
+            layout?: string; 
+            sections?: Record<string, any>;
+        }
+    ): void {
         if (!this.res) {
             throw new Error('Response no disponible');
         }
-        this.res.render(view, data);
+        
+        // Si se especifica un layout, preparar los datos para el layout
+        if (options?.layout) {
+            // Agregar información del layout a los datos
+            data._layout = {
+                name: options.layout,
+                view: view,
+                sections: options.sections || {}
+            };
+            // Renderizar el layout en lugar de la vista directamente
+            this.res.render(`layouts/${options.layout}`, data);
+        } else {
+            // Renderizar la vista normalmente
+            this.res.render(view, data);
+        }
     }
 
     /**

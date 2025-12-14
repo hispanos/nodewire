@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}} - Mi Aplicación</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            color: #667eea;
+            font-size: 24px;
+        }
+        .main-content {
+            flex: 1;
+            padding: 40px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .content-wrapper {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 1200px;
+            width: 100%;
+        }
+        .footer {
+            background: rgba(0, 0, 0, 0.2);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    {{!-- Usar @section con bloque - el contenedor solo se renderiza si la sección existe --}}
+    {{!-- Dentro del bloque, usar {{{content}}} para acceder al contenido de la sección --}}
+    {{#@section "header"}}
+    <header class="header">
+        <div class="header-content">
+            {{{content}}}
+        </div>
+    </header>
+    {{/@section}}
+    
+    {{!-- Ejemplo de sidebar - el helper @section maneja la validación internamente --}}
+    {{#@section "sidebar"}}
+    <aside class="sidebar" style="position: fixed; left: 0; top: 0; width: 250px; height: 100vh; background: rgba(255,255,255,0.9); padding: 20px;">
+        {{{content}}}
+    </aside>
+    {{/@section}}
+    
+    <main class="main-content" {{#if (lookup _sections "sidebar")}}style="margin-left: 250px;"{{/if}}>
+        <div class="content-wrapper">
+            {{{_content}}}
+        </div>
+    </main>
+    
+    {{!-- Footer - el helper @section maneja la validación internamente --}}
+    {{#@section "footer"}}
+    <footer class="footer">
+        <div class="footer-content">
+            {{{content}}}
+        </div>
+    </footer>
+    {{/@section}}
+
+    <script src="/js/nodewire-runtime.js"></script>
+</body>
+</html>
