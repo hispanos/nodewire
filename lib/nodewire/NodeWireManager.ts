@@ -28,6 +28,13 @@ export class NodeWireManager {
     }
 
     /**
+     * Verifica si un componente está registrado
+     */
+    public isComponentRegistered(name: string): boolean {
+        return this.componentRegistry.has(name);
+    }
+
+    /**
      * Crea una nueva instancia de un componente
      */
     public createComponent(name: string, ...args: any[]): Component {

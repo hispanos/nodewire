@@ -20,6 +20,11 @@ export abstract class BaseController {
     private _componentsInstance: Record<string, (...args: any[]) => Component> | null = null;
     
     /**
+     * Almacenar NodeWireManager directamente en la instancia para acceso rápido
+     */
+    private _nodeWireManager?: any;
+    
+    /**
      * Obtiene los componentes definidos en este controlador
      */
     public static getComponents(): Record<string, ComponentConstructor> {
@@ -71,8 +76,11 @@ export abstract class BaseController {
         instance: T, 
         nodeWireManager?: any
     ): T {
-        // Registrar componentes automáticamente si hay NodeWireManager
+        // Almacenar NodeWireManager en la instancia para acceso directo
         if (nodeWireManager) {
+            instance.setNodeWireManager(nodeWireManager);
+            
+            // Registrar componentes automáticamente si hay NodeWireManager
             const components = (instance.constructor as any).getComponents();
             if (components && Object.keys(components).length > 0) {
                 for (const [name, ComponentClass] of Object.entries(components)) {
@@ -87,15 +95,29 @@ export abstract class BaseController {
                 const value = (target as any)[prop];
                 
                 // Si es un método y no es bind, bind, req, res, etc.
+                // PERO solo si se accede directamente desde el Router
+                // No devolver método bindeado si se accede internamente
                 if (typeof value === 'function' && 
                     prop !== 'bind' && 
                     prop !== 'constructor' &&
-                    !prop.toString().startsWith('__')) {
-                    // Retornar el método bindeado
+                    prop !== 'render' &&
+                    prop !== 'json' &&
+                    prop !== 'createComponent' &&
+                    prop !== 'getNodeWireManager' &&
+                    prop !== 'setNodeWireManager' &&
+                    !prop.toString().startsWith('__') &&
+                    !prop.toString().startsWith('_')) {
+                    // Retornar el método bindeado solo para uso en rutas
+                    // El Router debe establecer req y res antes de llamarlo
                     return instance.bind(prop as keyof T);
                 }
                 
                 return value;
+            },
+            set(target: T, prop: string | symbol, value: any): boolean {
+                // Permitir establecer req y res directamente
+                (target as any)[prop] = value;
+                return true;
             }
         });
     }
@@ -162,10 +184,22 @@ export abstract class BaseController {
     }
 
     /**
-     * Obtiene el NodeWireManager desde app.locals
+     * Obtiene el NodeWireManager desde app.locals o desde la instancia
      */
     protected getNodeWireManager(): any {
+        // Primero intentar desde la instancia (más confiable)
+        if (this._nodeWireManager) {
+            return this._nodeWireManager;
+        }
+        // Fallback: desde req.app.locals
         return (this.req as any)?.app?.locals?.nodeWireManager;
+    }
+
+    /**
+     * Establece el NodeWireManager en la instancia
+     */
+    public setNodeWireManager(nodeWireManager: any): void {
+        this._nodeWireManager = nodeWireManager;
     }
 
     /**

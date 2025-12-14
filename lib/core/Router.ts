@@ -126,25 +126,62 @@ export class Router {
         ControllerClass: ControllerClass,
         methodName: string
     ): void {
-        // Crear instancia del controlador
-        const controllerInstance = new ControllerClass();
-        
-        // Registrar componentes automáticamente si hay NodeWireManager
-        if (this.nodeWireManager) {
-            const components = (ControllerClass as any).getComponents();
-            if (components && Object.keys(components).length > 0) {
-                for (const [name, ComponentClass] of Object.entries(components)) {
-                    this.nodeWireManager.registerComponent(name, ComponentClass as any);
+        // Crear wrapper que registra componentes de forma lazy (cuando se ejecuta la ruta)
+        this.router[method](path, async (req: Request, res: Response, next?: NextFunction) => {
+            try {
+                // Obtener NodeWireManager desde app.locals (se establece en Application)
+                const nodeWireManager = (req as any)?.app?.locals?.nodeWireManager;
+                
+                // Registrar componentes automáticamente si hay NodeWireManager
+                if (nodeWireManager) {
+                    const components = (ControllerClass as any).getComponents();
+                    if (components && Object.keys(components).length > 0) {
+                        for (const [name, ComponentClass] of Object.entries(components)) {
+                            // Verificar si el componente ya está registrado
+                            if (!nodeWireManager.isComponentRegistered(name)) {
+                                nodeWireManager.registerComponent(name, ComponentClass as any);
+                            }
+                        }
+                    }
+                }
+                
+                // Crear instancia del controlador
+                const controllerInstance = new ControllerClass();
+                
+                // Establecer req y res ANTES de crear el proxy
+                controllerInstance.req = req;
+                controllerInstance.res = res;
+                
+                // Crear proxy si hay NodeWireManager
+                const proxiedController = nodeWireManager 
+                    ? BaseController.createProxy(controllerInstance, nodeWireManager)
+                    : controllerInstance;
+                
+                // Asegurar que req y res estén en el proxiedController también
+                proxiedController.req = req;
+                proxiedController.res = res;
+                
+                // Obtener el método directamente de la instancia original
+                // para evitar que el proxy devuelva un método bindeado
+                const methodFunc = (controllerInstance as any)[methodName];
+                if (typeof methodFunc !== 'function') {
+                    throw new Error(`El método ${methodName} no existe en ${ControllerClass.name}`);
+                }
+                
+                // Llamar al método con el proxiedController como contexto
+                // para que tenga acceso a req, res y componentes
+                await methodFunc.call(proxiedController);
+            } catch (error) {
+                if (next) {
+                    next(error);
+                } else {
+                    console.error(`Error en ${ControllerClass.name}.${methodName}:`, error);
+                    if (!res.headersSent) {
+                        res.status(500).send('Error interno del servidor');
+                    }
                 }
             }
-            
-            // Crear proxy para acceso a componentes
-            const proxiedController = BaseController.createProxy(controllerInstance, this.nodeWireManager);
-            this.router[method](path, this.createControllerWrapper(proxiedController, methodName));
-        } else {
-            // Sin NodeWireManager, usar directamente
-            this.router[method](path, this.createControllerWrapper(controllerInstance, methodName));
-        }
+        });
     }
 
     /**
