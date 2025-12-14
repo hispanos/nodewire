@@ -44,6 +44,59 @@ export class NodeWireManager {
     }
 
     /**
+     * Crea un componente con opciones nombradas
+     * Las opciones se mapean a los parámetros del constructor
+     */
+    public createComponentWithOptions(name: string, options: Record<string, any>): Component {
+        const ComponentClass = this.componentRegistry.get(name);
+        
+        if (!ComponentClass) {
+            throw new Error(`Componente ${name} no está registrado`);
+        }
+
+        // Obtener los parámetros del constructor usando reflection
+        const constructorParams = this.getConstructorParams(ComponentClass);
+        
+        // Mapear las opciones a los argumentos del constructor en el orden correcto
+        const args = constructorParams.map((paramName: string) => {
+            // Buscar la opción por nombre (case-insensitive y sin guiones)
+            const normalizedParam = paramName.toLowerCase().replace(/[_-]/g, '');
+            for (const [key, value] of Object.entries(options)) {
+                const normalizedKey = key.toLowerCase().replace(/[_-]/g, '');
+                if (normalizedKey === normalizedParam) {
+                    return value;
+                }
+            }
+            return undefined;
+        });
+
+        const component = new ComponentClass(...args);
+        this.components.set(component.id, component);
+        
+        return component;
+    }
+
+    /**
+     * Obtiene los nombres de los parámetros del constructor usando reflection
+     * Nota: Esto requiere que el código no esté minificado
+     */
+    private getConstructorParams(ComponentClass: ComponentConstructor): string[] {
+        try {
+            const constructorString = ComponentClass.toString();
+            const match = constructorString.match(/constructor\s*\(([^)]*)\)/);
+            if (match && match[1]) {
+                return match[1]
+                    .split(',')
+                    .map(param => param.trim().split(':')[0].trim())
+                    .filter(param => param.length > 0);
+            }
+        } catch (e) {
+            // Si falla, retornar array vacío
+        }
+        return [];
+    }
+
+    /**
      * Obtiene un componente por su ID
      */
     public getComponent(id: string): Component | undefined {

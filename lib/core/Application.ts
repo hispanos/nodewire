@@ -9,6 +9,9 @@ export interface ApplicationConfig {
     viewsPath?: string;
     publicPath?: string;
     staticPath?: string;
+    controllersPath?: string;
+    modelsPath?: string;
+    basePath?: string;
 }
 
 export class Application {
@@ -21,7 +24,18 @@ export class Application {
     constructor(config: ApplicationConfig = {}) {
         this.app = express();
         this.nodeWireManager = new NodeWireManager();
-        this.config = config;
+        
+        // Configurar rutas por defecto basadas en process.cwd()
+        const basePath = config.basePath || process.cwd();
+        this.config = {
+            viewsPath: config.viewsPath || path.join(basePath, 'resources/views'),
+            publicPath: config.publicPath || path.join(basePath, 'public'),
+            staticPath: config.staticPath || path.join(basePath, 'public'),
+            controllersPath: config.controllersPath || path.join(basePath, 'app/controllers'),
+            modelsPath: config.modelsPath || path.join(basePath, 'app/models'),
+            basePath: basePath
+        };
+        
         this.setupMiddleware();
         this.setupViewEngine();
         this.setupNodeWire();
@@ -33,14 +47,15 @@ export class Application {
         this.app.use(express.urlencoded({ extended: true }));
 
         // Servir archivos estáticos
-        const staticPath = this.config.staticPath || this.config.publicPath || path.join(process.cwd(), 'public');
-        this.app.use(express.static(staticPath));
+        this.app.use(express.static(this.config.staticPath!));
+
+        // Exponer NodeWireManager en app.locals para que los controladores puedan acceder
+        this.app.locals.nodeWireManager = this.nodeWireManager;
 
         // Helper para renderizar vistas
         this.app.use((req: Request, res: Response, next: NextFunction) => {
             res.render = (view: string, data: any = {}) => {
-                const viewsPath = this.config.viewsPath || path.join(process.cwd(), 'resources/views');
-                const viewPath = path.join(viewsPath, `${view}.ejs`);
+                const viewPath = path.join(this.config.viewsPath!, `${view}.ejs`);
                 const ejs = require('ejs');
                 
                 // Agregar helpers de NodeWire para que estén disponibles en includes
@@ -91,7 +106,7 @@ export class Application {
                     { ...data, ...nodewireHelpers, req, res }, 
                     {
                         filename: viewPath,
-                        root: viewsPath
+                        root: this.config.viewsPath!
                     },
                     (err: Error | null, html: string) => {
                         if (err) {
@@ -107,9 +122,8 @@ export class Application {
     }
 
     private setupViewEngine(): void {
-        const viewsPath = this.config.viewsPath || path.join(process.cwd(), 'resources/views');
         this.app.set('view engine', 'ejs');
-        this.app.set('views', viewsPath);
+        this.app.set('views', this.config.viewsPath!);
         
         // Configurar EJS para que los helpers estén disponibles en includes
         const ejs = require('ejs');
@@ -127,7 +141,7 @@ export class Application {
                     component,
                     method,
                     state,
-                    this.config.viewsPath || path.join(process.cwd(), 'resources/views')
+                    this.config.viewsPath
                 );
 
                 res.json(result);
@@ -164,7 +178,7 @@ export class Application {
                         component,
                         method,
                         state,
-                        this.config.viewsPath || path.join(process.cwd(), 'resources/views')
+                        this.config.viewsPath
                     );
 
                     // Enviar respuesta con el requestId para que el cliente pueda hacer match

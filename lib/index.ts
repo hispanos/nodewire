@@ -5,6 +5,7 @@
 
 export { Application, ApplicationConfig } from './core/Application';
 export { Router } from './core/Router';
+export { BaseController } from './core/BaseController';
 export { Component } from './nodewire/Component';
 export { NodeWireManager } from './nodewire/NodeWireManager';
 

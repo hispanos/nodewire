@@ -1,31 +1,23 @@
-import { Application, Router } from 'framework-mvc-nodewire';
-import { CounterComponent } from './app/Components/CounterComponent';
-import path from 'node:path';
+import { Application, Router, BaseController } from 'framework-mvc-nodewire';
+import { HomeController } from './app/controllers/HomeController';
 
-// Crear instancia de la aplicación con configuración
-const app = new Application({
-    viewsPath: path.join(__dirname, '../resources/views'),
-    publicPath: path.join(__dirname, '../public'),
-    staticPath: path.join(__dirname, '../public')
-});
+// Crear instancia de la aplicación (sin configuración, usa valores por defecto)
+// Valores por defecto:
+// - views: resources/views
+// - controllers: app/controllers
+// - models: app/models
+// - public: public
+const app = new Application();
 
-// Registrar componentes NodeWire
+// Crear instancia del controlador con Proxy
+// Los componentes se registran automáticamente desde el controlador
 const nodeWireManager = app.getNodeWireManager();
-nodeWireManager.registerComponent('CounterComponent', CounterComponent);
+const homeController = BaseController.createProxy(new HomeController(), nodeWireManager);
 
-// Configurar rutas
+// Configurar rutas - ahora es súper simple!
 const router = new Router();
-
-// Ruta de ejemplo
-router.get('/', (req, res) => {
-    // Crear una instancia del componente Counter
-    const counterComponent = nodeWireManager.createComponent('CounterComponent', 0);
-    
-    res.render('welcome', { 
-        title: 'Framework MVC con NodeWire',
-        counterComponent: counterComponent
-    });
-});
+// Ahora puedes usar controller.method directamente!
+router.get('/', homeController.index);
 
 // Registrar rutas en la aplicación
 app.use(router);
@@ -35,4 +27,3 @@ const PORT = Number(process.env.PORT) || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
 });
-
