@@ -1,5 +1,7 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import path from 'node:path';
+import { createServer, Server as HttpServer } from 'node:http';
+import { WebSocketServer, WebSocket } from 'ws';
 import { NodeWireManager } from '../nodewire/NodeWireManager';
 import { Router } from './Router';
 
@@ -11,6 +13,8 @@ export interface ApplicationConfig {
 
 export class Application {
     private app: Express;
+    private httpServer: HttpServer | null = null;
+    private wss: WebSocketServer | null = null;
     private nodeWireManager: NodeWireManager;
     private config: ApplicationConfig;
 
@@ -113,7 +117,7 @@ export class Application {
     }
 
     private setupNodeWire(): void {
-        // Endpoint para las llamadas de NodeWire
+        // Endpoint HTTP para compatibilidad (fallback)
         this.app.post('/nodewire/call', async (req: Request, res: Response) => {
             try {
                 const { id, component, method, state } = req.body;
@@ -137,6 +141,56 @@ export class Application {
         });
     }
 
+    private setupWebSocket(): void {
+        if (!this.httpServer) {
+            throw new Error('HTTP server must be created before WebSocket server');
+        }
+
+        this.wss = new WebSocketServer({ 
+            server: this.httpServer,
+            path: '/nodewire/ws'
+        });
+
+        this.wss.on('connection', (ws: WebSocket) => {
+            console.log('[NodeWire] Cliente WebSocket conectado');
+
+            ws.on('message', async (message: string) => {
+                try {
+                    const data = JSON.parse(message.toString());
+                    const { id, component, method, state, requestId } = data;
+
+                    const result = await this.nodeWireManager.handleComponentCall(
+                        id,
+                        component,
+                        method,
+                        state,
+                        this.config.viewsPath || path.join(process.cwd(), 'resources/views')
+                    );
+
+                    // Enviar respuesta con el requestId para que el cliente pueda hacer match
+                    ws.send(JSON.stringify({
+                        ...result,
+                        requestId
+                    }));
+                } catch (error: any) {
+                    console.error('[NodeWire] Error procesando mensaje WebSocket:', error);
+                    ws.send(JSON.stringify({
+                        success: false,
+                        error: error.message || 'Error desconocido'
+                    }));
+                }
+            });
+
+            ws.on('close', () => {
+                console.log('[NodeWire] Cliente WebSocket desconectado');
+            });
+
+            ws.on('error', (error: Error) => {
+                console.error('[NodeWire] Error en WebSocket:', error);
+            });
+        });
+    }
+
     public use(router: any): void {
         if (router instanceof Router) {
             this.app.use(router.getRouter());
@@ -146,7 +200,17 @@ export class Application {
     }
 
     public listen(port: number, callback?: () => void): void {
-        this.app.listen(port, callback);
+        // Crear servidor HTTP
+        this.httpServer = createServer(this.app);
+        
+        // Configurar WebSocket
+        this.setupWebSocket();
+        
+        // Iniciar servidor
+        this.httpServer.listen(port, () => {
+            console.log(`[NodeWire] WebSocket server disponible en ws://localhost:${port}/nodewire/ws`);
+            if (callback) callback();
+        });
     }
 
     public getApp(): Express {
