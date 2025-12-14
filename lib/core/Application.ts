@@ -207,6 +207,10 @@ export class Application {
 
     public use(router: any): void {
         if (router instanceof Router) {
+            // Configurar NodeWireManager en el Router si no lo tiene
+            if (!(router as any).nodeWireManager) {
+                (router as any).setNodeWireManager(this.nodeWireManager);
+            }
             this.app.use(router.getRouter());
         } else {
             this.app.use(router);

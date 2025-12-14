@@ -1,13 +1,24 @@
 import express, { Router as ExpressRouter, Request, Response, NextFunction } from 'express';
 import { BaseController } from './BaseController';
+import { NodeWireManager } from '../nodewire/NodeWireManager';
 
 type RouteHandler = (req: Request, res: Response, next?: NextFunction) => void | Promise<void>;
+type ControllerClass = new () => BaseController;
 
 export class Router {
     private router: ExpressRouter;
+    private nodeWireManager: NodeWireManager | null = null;
 
-    constructor() {
+    constructor(nodeWireManager?: NodeWireManager) {
         this.router = express.Router();
+        this.nodeWireManager = nodeWireManager || null;
+    }
+
+    /**
+     * Establece el NodeWireManager para registro automático de componentes
+     */
+    public setNodeWireManager(nodeWireManager: NodeWireManager): void {
+        this.nodeWireManager = nodeWireManager;
     }
 
     /**
@@ -83,16 +94,57 @@ export class Router {
     /**
      * Registra una ruta GET
      * Uso simplificado:
-     *   - router.get('path', controller.bind('method'))  // Recomendado
+     *   - router.get('path', ControllerClass, 'method')  // Super simple!
+     *   - router.get('path', controller.bind('method'))  // Con instancia ya creada
      *   - router.get('path', 'method', controller)       // Alternativa
      *   - router.get('path', (req, res) => { ... })      // Handler directo
      */
     public get(
         path: string, 
-        handler: RouteHandler | ((req: Request, res: Response) => void | Promise<void>) | string,
-        controllerInstance?: BaseController
+        handlerOrController: RouteHandler | ControllerClass | ((req: Request, res: Response) => void | Promise<void>) | string | BaseController,
+        methodNameOrHandler?: string | BaseController | RouteHandler
     ): void {
-        this.router.get(path, this.wrapHandler(handler, controllerInstance));
+        // Caso especial: router.get('path', ControllerClass, 'method')
+        if (typeof handlerOrController === 'function' && 
+            handlerOrController.prototype instanceof BaseController &&
+            typeof methodNameOrHandler === 'string') {
+            this.registerControllerRoute(path, 'get', handlerOrController as ControllerClass, methodNameOrHandler);
+            return;
+        }
+
+        // Casos normales
+        this.router.get(path, this.wrapHandler(handlerOrController as any, methodNameOrHandler as BaseController));
+    }
+
+    /**
+     * Registra una ruta con un controlador de forma automática
+     * Crea la instancia, registra componentes y hace el bind automáticamente
+     */
+    private registerControllerRoute(
+        path: string,
+        method: 'get' | 'post' | 'put' | 'delete' | 'patch',
+        ControllerClass: ControllerClass,
+        methodName: string
+    ): void {
+        // Crear instancia del controlador
+        const controllerInstance = new ControllerClass();
+        
+        // Registrar componentes automáticamente si hay NodeWireManager
+        if (this.nodeWireManager) {
+            const components = (ControllerClass as any).getComponents();
+            if (components && Object.keys(components).length > 0) {
+                for (const [name, ComponentClass] of Object.entries(components)) {
+                    this.nodeWireManager.registerComponent(name, ComponentClass as any);
+                }
+            }
+            
+            // Crear proxy para acceso a componentes
+            const proxiedController = BaseController.createProxy(controllerInstance, this.nodeWireManager);
+            this.router[method](path, this.createControllerWrapper(proxiedController, methodName));
+        } else {
+            // Sin NodeWireManager, usar directamente
+            this.router[method](path, this.createControllerWrapper(controllerInstance, methodName));
+        }
     }
 
     /**
@@ -100,10 +152,16 @@ export class Router {
      */
     public post(
         path: string, 
-        handler: RouteHandler | ((req: Request, res: Response) => void | Promise<void>) | string,
-        controllerInstance?: BaseController
+        handlerOrController: RouteHandler | ControllerClass | ((req: Request, res: Response) => void | Promise<void>) | string | BaseController,
+        methodNameOrHandler?: string | BaseController | RouteHandler
     ): void {
-        this.router.post(path, this.wrapHandler(handler, controllerInstance));
+        if (typeof handlerOrController === 'function' && 
+            handlerOrController.prototype instanceof BaseController &&
+            typeof methodNameOrHandler === 'string') {
+            this.registerControllerRoute(path, 'post', handlerOrController as ControllerClass, methodNameOrHandler);
+            return;
+        }
+        this.router.post(path, this.wrapHandler(handlerOrController as any, methodNameOrHandler as BaseController));
     }
 
     /**
@@ -111,10 +169,16 @@ export class Router {
      */
     public put(
         path: string, 
-        handler: RouteHandler | ((req: Request, res: Response) => void | Promise<void>) | string,
-        controllerInstance?: BaseController
+        handlerOrController: RouteHandler | ControllerClass | ((req: Request, res: Response) => void | Promise<void>) | string | BaseController,
+        methodNameOrHandler?: string | BaseController | RouteHandler
     ): void {
-        this.router.put(path, this.wrapHandler(handler, controllerInstance));
+        if (typeof handlerOrController === 'function' && 
+            handlerOrController.prototype instanceof BaseController &&
+            typeof methodNameOrHandler === 'string') {
+            this.registerControllerRoute(path, 'put', handlerOrController as ControllerClass, methodNameOrHandler);
+            return;
+        }
+        this.router.put(path, this.wrapHandler(handlerOrController as any, methodNameOrHandler as BaseController));
     }
 
     /**
@@ -122,10 +186,16 @@ export class Router {
      */
     public delete(
         path: string, 
-        handler: RouteHandler | ((req: Request, res: Response) => void | Promise<void>) | string,
-        controllerInstance?: BaseController
+        handlerOrController: RouteHandler | ControllerClass | ((req: Request, res: Response) => void | Promise<void>) | string | BaseController,
+        methodNameOrHandler?: string | BaseController | RouteHandler
     ): void {
-        this.router.delete(path, this.wrapHandler(handler, controllerInstance));
+        if (typeof handlerOrController === 'function' && 
+            handlerOrController.prototype instanceof BaseController &&
+            typeof methodNameOrHandler === 'string') {
+            this.registerControllerRoute(path, 'delete', handlerOrController as ControllerClass, methodNameOrHandler);
+            return;
+        }
+        this.router.delete(path, this.wrapHandler(handlerOrController as any, methodNameOrHandler as BaseController));
     }
 
     /**
@@ -133,10 +203,16 @@ export class Router {
      */
     public patch(
         path: string, 
-        handler: RouteHandler | ((req: Request, res: Response) => void | Promise<void>) | string,
-        controllerInstance?: BaseController
+        handlerOrController: RouteHandler | ControllerClass | ((req: Request, res: Response) => void | Promise<void>) | string | BaseController,
+        methodNameOrHandler?: string | BaseController | RouteHandler
     ): void {
-        this.router.patch(path, this.wrapHandler(handler, controllerInstance));
+        if (typeof handlerOrController === 'function' && 
+            handlerOrController.prototype instanceof BaseController &&
+            typeof methodNameOrHandler === 'string') {
+            this.registerControllerRoute(path, 'patch', handlerOrController as ControllerClass, methodNameOrHandler);
+            return;
+        }
+        this.router.patch(path, this.wrapHandler(handlerOrController as any, methodNameOrHandler as BaseController));
     }
 
     public getRouter(): ExpressRouter {

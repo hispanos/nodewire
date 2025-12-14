@@ -1,4 +1,4 @@
-import { Application, Router, BaseController } from 'framework-mvc-nodewire';
+import { Application, Router } from 'framework-mvc-nodewire';
 import { HomeController } from './app/controllers/HomeController';
 
 // Crear instancia de la aplicación (sin configuración, usa valores por defecto)
@@ -9,15 +9,11 @@ import { HomeController } from './app/controllers/HomeController';
 // - public: public
 const app = new Application();
 
-// Crear instancia del controlador con Proxy
-// Los componentes se registran automáticamente desde el controlador
-const nodeWireManager = app.getNodeWireManager();
-const homeController = BaseController.createProxy(new HomeController(), nodeWireManager);
-
 // Configurar rutas - ahora es súper simple!
 const router = new Router();
-// Ahora puedes usar controller.method directamente!
-router.get('/', homeController.index);
+// Solo necesitas pasar la clase del controlador y el nombre del método
+// El Router se encarga de todo: crear instancia, registrar componentes, hacer bind
+router.get('/', HomeController, 'index');
 
 // Registrar rutas en la aplicación
 app.use(router);
