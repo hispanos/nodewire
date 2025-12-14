@@ -1,5 +1,5 @@
 import { Component } from './Component';
-import path from 'path';
+import path from 'node:path';
 import ejs from 'ejs';
 
 type ComponentConstructor = new (...args: any[]) => Component;
@@ -7,6 +7,18 @@ type ComponentConstructor = new (...args: any[]) => Component;
 export class NodeWireManager {
     private components: Map<string, Component> = new Map();
     private componentRegistry: Map<string, ComponentConstructor> = new Map();
+    private viewsPath: string;
+
+    constructor(viewsPath?: string) {
+        this.viewsPath = viewsPath || path.join(process.cwd(), 'resources/views');
+    }
+
+    /**
+     * Establece la ruta de las vistas
+     */
+    public setViewsPath(viewsPath: string): void {
+        this.viewsPath = viewsPath;
+    }
 
     /**
      * Registra un componente para que pueda ser instanciado
@@ -45,9 +57,12 @@ export class NodeWireManager {
         id: string,
         componentName: string,
         method: string,
-        state: Record<string, any>
+        state: Record<string, any>,
+        viewsPath?: string
     ): Promise<{ success: boolean; html?: string; error?: string; newState?: Record<string, any> }> {
         try {
+            const effectiveViewsPath = viewsPath || this.viewsPath;
+            
             // Buscar o recrear el componente
             let component = this.components.get(id);
             
@@ -75,7 +90,7 @@ export class NodeWireManager {
             await (component as any)[method]();
 
             // Renderizar el componente actualizado
-            const html = component.render(this.getTemplateEngine());
+            const html = component.render(this.getTemplateEngine(effectiveViewsPath));
 
             // Obtener el nuevo estado
             const newState = component.getState();
@@ -104,15 +119,21 @@ export class NodeWireManager {
     /**
      * Obtiene el motor de plantillas EJS configurado
      */
-    private getTemplateEngine(): any {
-        return {
-            render: (template: string, data: any): string => {
-                const templatePath = path.join(__dirname, '../../resources/views', `${template}.ejs`);
-                const fs = require('fs');
-                const templateContent = fs.readFileSync(templatePath, 'utf8');
-                return ejs.render(templateContent, data);
-            }
-        };
+    private getTemplateEngine(viewsPath?: string): any {
+            const effectiveViewsPath = viewsPath || this.viewsPath;
+            return {
+                render: (template: string, data: any): string => {
+                    // Sanitizar el nombre del template para evitar path traversal
+                    // Permitir barras pero eliminar .. y rutas absolutas
+                    let safeTemplate = template.replace(/\.\./g, '').replace(/^\/+/, '');
+                    // Normalizar separadores de ruta
+                    safeTemplate = safeTemplate.replace(/\\/g, '/');
+                    const templatePath = path.join(effectiveViewsPath, `${safeTemplate}.ejs`);
+                    const fs = require('node:fs');
+                    const templateContent = fs.readFileSync(templatePath, 'utf8');
+                    return ejs.render(templateContent, data);
+                }
+            };
     }
 
     /**

@@ -1,15 +1,23 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
-import path from 'path';
+import path from 'node:path';
 import { NodeWireManager } from '../nodewire/NodeWireManager';
 import { Router } from './Router';
+
+export interface ApplicationConfig {
+    viewsPath?: string;
+    publicPath?: string;
+    staticPath?: string;
+}
 
 export class Application {
     private app: Express;
     private nodeWireManager: NodeWireManager;
+    private config: ApplicationConfig;
 
-    constructor() {
+    constructor(config: ApplicationConfig = {}) {
         this.app = express();
         this.nodeWireManager = new NodeWireManager();
+        this.config = config;
         this.setupMiddleware();
         this.setupViewEngine();
         this.setupNodeWire();
@@ -21,12 +29,14 @@ export class Application {
         this.app.use(express.urlencoded({ extended: true }));
 
         // Servir archivos estáticos
-        this.app.use(express.static(path.join(__dirname, '../../public')));
+        const staticPath = this.config.staticPath || this.config.publicPath || path.join(process.cwd(), 'public');
+        this.app.use(express.static(staticPath));
 
         // Helper para renderizar vistas
         this.app.use((req: Request, res: Response, next: NextFunction) => {
             res.render = (view: string, data: any = {}) => {
-                const viewPath = path.join(__dirname, '../../resources/views', `${view}.ejs`);
+                const viewsPath = this.config.viewsPath || path.join(process.cwd(), 'resources/views');
+                const viewPath = path.join(viewsPath, `${view}.ejs`);
                 const ejs = require('ejs');
                 ejs.renderFile(viewPath, { ...data, req, res }, (err: Error | null, html: string) => {
                     if (err) {
@@ -41,8 +51,9 @@ export class Application {
     }
 
     private setupViewEngine(): void {
+        const viewsPath = this.config.viewsPath || path.join(process.cwd(), 'resources/views');
         this.app.set('view engine', 'ejs');
-        this.app.set('views', path.join(__dirname, '../../resources/views'));
+        this.app.set('views', viewsPath);
     }
 
     private setupNodeWire(): void {
@@ -55,7 +66,8 @@ export class Application {
                     id,
                     component,
                     method,
-                    state
+                    state,
+                    this.config.viewsPath || path.join(process.cwd(), 'resources/views')
                 );
 
                 res.json(result);

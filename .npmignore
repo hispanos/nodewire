@@ -1,0 +1,10 @@
+examples/
+src/
+resources/
+public/
+*.log
+.env
+.DS_Store
+tsconfig.json
+lib/tsconfig.json
+

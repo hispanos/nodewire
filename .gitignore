@@ -3,4 +3,8 @@ dist/
 *.log
 .env
 .DS_Store
+examples/node_modules/
+examples/dist/
+lib/node_modules/
+lib/dist/
 
