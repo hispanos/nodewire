@@ -11,10 +11,6 @@ class NodeWireRuntime {
     init() {
         // Interceptar eventos de click
         document.addEventListener('click', this.handleClick.bind(this));
-        
-        // Interceptar otros eventos comunes si es necesario
-        // document.addEventListener('submit', this.handleSubmit.bind(this));
-        // document.addEventListener('change', this.handleChange.bind(this));
     }
 
     /**
@@ -29,26 +25,56 @@ class NodeWireRuntime {
         e.preventDefault();
         e.stopPropagation();
 
-        const componentRoot = target.closest('[data-nodewire-id]');
-        if (!componentRoot) {
-            console.warn('[NodeWire] No se encontró el componente raíz');
+        // Obtener el ID del componente desde el botón o buscar el más cercano
+        let componentId = target.getAttribute('data-nodewire-id');
+        let componentName = target.getAttribute('data-nodewire-component');
+        
+        // Si no está en el botón, buscar en un elemento padre
+        if (!componentId) {
+            const parentWithId = target.closest('[data-nodewire-id]');
+            if (parentWithId) {
+                componentId = parentWithId.getAttribute('data-nodewire-id');
+                componentName = parentWithId.getAttribute('data-nodewire-component') || componentName;
+            }
+        }
+
+        if (!componentId) {
+            console.warn('[NodeWire] No se encontró el ID del componente');
             return;
         }
 
-        const componentId = componentRoot.getAttribute('data-nodewire-id');
-        const componentName = componentRoot.getAttribute('data-nodewire-name');
-        const currentState = JSON.parse(componentRoot.getAttribute('data-nodewire-state') || '{}');
+        // Buscar el estado del componente desde un elemento oculto o desde el mismo elemento
+        const stateElement = document.querySelector(`[data-nodewire-state="${componentId}"]`);
+        let currentState = {};
+        
+        if (stateElement) {
+            try {
+                currentState = JSON.parse(stateElement.textContent || stateElement.getAttribute('data-state') || '{}');
+            } catch (e) {
+                console.warn('[NodeWire] Error parseando el estado:', e);
+            }
+        }
 
-        this.callBackend(componentId, componentName, method, currentState, componentRoot);
+        // Si no hay nombre del componente, intentar obtenerlo del estado
+        if (!componentName) {
+            componentName = stateElement?.getAttribute('data-component-name');
+        }
+
+        if (!componentName) {
+            console.warn('[NodeWire] No se encontró el nombre del componente');
+            return;
+        }
+
+        this.callBackend(componentId, componentName, method, currentState);
     }
 
     /**
      * Realiza la petición AJAX al servidor
      */
-    async callBackend(id, name, method, state, rootElement) {
+    async callBackend(id, name, method, state) {
         try {
-            // Mostrar indicador de carga (opcional)
-            this.showLoading(rootElement);
+            // Mostrar indicador de carga en todos los elementos del componente
+            this.showLoading(id);
 
             const response = await fetch(this.endpoint, {
                 method: 'POST',
@@ -67,79 +93,90 @@ class NodeWireRuntime {
             const result = await response.json();
 
             if (result.success) {
-                // Actualizar el DOM con el nuevo HTML
-                this.updateDOM(rootElement, result.html, result.newState);
+                // Actualizar solo los elementos con el data-nodewire-id correspondiente
+                this.updateElements(id, result.html, result.newState);
             } else {
                 console.error('[NodeWire] Error:', result.error);
-                this.showError(rootElement, result.error);
+                this.showError(id, result.error);
             }
         } catch (error) {
             console.error('[NodeWire] Error de red:', error);
-            this.showError(rootElement, 'Error de conexión con el servidor');
+            this.showError(id, 'Error de conexión con el servidor');
         } finally {
-            this.hideLoading(rootElement);
+            this.hideLoading(id);
         }
     }
 
     /**
-     * Actualiza el DOM con el nuevo HTML renderizado
-     * Estrategia: Reemplazar el contenido interno del componente manteniendo el elemento raíz
+     * Actualiza solo los elementos con el data-nodewire-id especificado
      */
-    updateDOM(rootElement, newHTML, newState) {
+    updateElements(componentId, newHTML, newState) {
         // Crear un elemento temporal para parsear el nuevo HTML
         const temp = document.createElement('div');
         temp.innerHTML = newHTML;
 
-        // Obtener el nuevo elemento raíz del HTML renderizado
-        const newRoot = temp.querySelector('[data-nodewire-id]');
+        // Buscar todos los elementos con el ID del componente en el nuevo HTML
+        const newElements = temp.querySelectorAll(`[data-nodewire-id="${componentId}"]`);
         
-        if (!newRoot) {
-            console.warn('[NodeWire] El HTML renderizado no contiene un elemento raíz válido');
-            return;
+        // Buscar todos los elementos actuales con ese ID
+        const currentElements = document.querySelectorAll(`[data-nodewire-id="${componentId}"]`);
+
+        // Actualizar cada elemento actual con su correspondiente del nuevo HTML
+        currentElements.forEach((currentEl, index) => {
+            const newEl = newElements[index];
+            if (newEl) {
+                // Actualizar el contenido del elemento
+                currentEl.innerHTML = newEl.innerHTML;
+                
+                // Copiar atributos relevantes (excepto data-nodewire-id)
+                Array.from(newEl.attributes).forEach(attr => {
+                    if (attr.name !== 'data-nodewire-id') {
+                        currentEl.setAttribute(attr.name, attr.value);
+                    }
+                });
+            }
+        });
+
+        // Actualizar el elemento de estado si existe
+        const stateElement = document.querySelector(`[data-nodewire-state="${componentId}"]`);
+        if (stateElement) {
+            stateElement.textContent = JSON.stringify(newState || {});
         }
 
-        // Actualizar el estado en el atributo data-nodewire-state
-        rootElement.setAttribute('data-nodewire-state', JSON.stringify(newState || {}));
-
-        // Guardar el ID y nombre del componente (por si cambian)
-        const newId = newRoot.getAttribute('data-nodewire-id');
-        const newName = newRoot.getAttribute('data-nodewire-name');
-        
-        if (newId) rootElement.setAttribute('data-nodewire-id', newId);
-        if (newName) rootElement.setAttribute('data-nodewire-name', newName);
-
-        // Reemplazar el contenido interno del componente
-        // Esto preserva el elemento raíz pero actualiza todo su contenido
-        rootElement.innerHTML = newRoot.innerHTML;
-
         // Disparar evento personalizado para notificar la actualización
-        rootElement.dispatchEvent(new CustomEvent('nodewire:updated', {
-            detail: { newState }
+        document.dispatchEvent(new CustomEvent('nodewire:updated', {
+            detail: { componentId, newState }
         }));
     }
 
     /**
-     * Muestra un indicador de carga (opcional)
+     * Muestra un indicador de carga en todos los elementos del componente
      */
-    showLoading(element) {
-        element.style.opacity = '0.6';
-        element.style.pointerEvents = 'none';
+    showLoading(componentId) {
+        const elements = document.querySelectorAll(`[data-nodewire-id="${componentId}"]`);
+        elements.forEach(el => {
+            el.style.opacity = '0.6';
+            el.style.pointerEvents = 'none';
+        });
     }
 
     /**
      * Oculta el indicador de carga
      */
-    hideLoading(element) {
-        element.style.opacity = '1';
-        element.style.pointerEvents = 'auto';
+    hideLoading(componentId) {
+        const elements = document.querySelectorAll(`[data-nodewire-id="${componentId}"]`);
+        elements.forEach(el => {
+            el.style.opacity = '1';
+            el.style.pointerEvents = 'auto';
+        });
     }
 
     /**
-     * Muestra un error (opcional)
+     * Muestra un error
      */
-    showError(element, message) {
-        // Puedes implementar una notificación de error aquí
+    showError(componentId, message) {
         console.error('[NodeWire]', message);
+        // Puedes implementar una notificación de error aquí
     }
 }
 
@@ -151,4 +188,3 @@ if (document.readyState === 'loading') {
 } else {
     window.NodeWire = new NodeWireRuntime();
 }
-

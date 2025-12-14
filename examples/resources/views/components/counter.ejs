@@ -1,18 +1,22 @@
-<div 
-    data-nodewire-id="<%= component.id %>"
-    data-nodewire-state='<%= JSON.stringify(component.getState()) %>'
-    data-nodewire-name="<%= component.name %>"
-    style="text-align: center; padding: 30px; background: #f8f9fa; border-radius: 10px;"
->
+<!-- Helper para generar el estado automáticamente (opcional, puedes hacerlo manualmente) -->
+<%- nodewireState(component) %>
+
+<div style="text-align: center; padding: 30px; background: #f8f9fa; border-radius: 10px;">
     <h2 style="color: #333; margin-bottom: 20px;">Contador NodeWire</h2>
     
-    <div id="nodewire-display-<%= component.id %>" style="font-size: 48px; font-weight: bold; color: #667eea; margin: 20px 0;">
+    <!-- Solo este elemento se actualiza automáticamente - solo necesitas data-nodewire-id -->
+    <div 
+        data-nodewire-id="<%= nodewireId(component) %>"
+        style="font-size: 48px; font-weight: bold; color: #667eea; margin: 20px 0;"
+    >
         <%= component.count %>
     </div>
 
     <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
         <button 
-            data-nw-click="decrement" 
+            data-nw-click="decrement"
+            data-nodewire-id="<%= nodewireId(component) %>"
+            data-nodewire-component="<%= nodewireComponent(component) %>"
             style="padding: 12px 24px; font-size: 18px; background: #dc3545; color: white; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s;"
             onmouseover="this.style.transform='scale(1.05)'"
             onmouseout="this.style.transform='scale(1)'"
@@ -21,7 +25,9 @@
         </button>
         
         <button 
-            data-nw-click="reset" 
+            data-nw-click="reset"
+            data-nodewire-id="<%= nodewireId(component) %>"
+            data-nodewire-component="<%= nodewireComponent(component) %>"
             style="padding: 12px 24px; font-size: 18px; background: #6c757d; color: white; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s;"
             onmouseover="this.style.transform='scale(1.05)'"
             onmouseout="this.style.transform='scale(1)'"
@@ -30,7 +36,9 @@
         </button>
         
         <button 
-            data-nw-click="increment" 
+            data-nw-click="increment"
+            data-nodewire-id="<%= nodewireId(component) %>"
+            data-nodewire-component="<%= nodewireComponent(component) %>"
             style="padding: 12px 24px; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s;"
             onmouseover="this.style.transform='scale(1.05)'"
             onmouseout="this.style.transform='scale(1)'"
@@ -39,4 +47,3 @@
         </button>
     </div>
 </div>
-

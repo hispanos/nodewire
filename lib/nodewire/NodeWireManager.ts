@@ -131,7 +131,21 @@ export class NodeWireManager {
                     const templatePath = path.join(effectiveViewsPath, `${safeTemplate}.ejs`);
                     const fs = require('node:fs');
                     const templateContent = fs.readFileSync(templatePath, 'utf8');
-                    return ejs.render(templateContent, data);
+                    
+                    // Agregar helpers para NodeWire
+                    const helpers = {
+                        nodewireState: (component: any) => {
+                            return `<script type="application/json" data-nodewire-state="${component.id}" data-component-name="${component.name}">${JSON.stringify(component.getState())}</script>`;
+                        },
+                        nodewireId: (component: any) => {
+                            return component.id;
+                        },
+                        nodewireComponent: (component: any) => {
+                            return component.name;
+                        }
+                    };
+                    
+                    return ejs.render(templateContent, { ...data, ...helpers });
                 }
             };
     }

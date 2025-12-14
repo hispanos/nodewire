@@ -38,13 +38,35 @@ export class Application {
                 const viewsPath = this.config.viewsPath || path.join(process.cwd(), 'resources/views');
                 const viewPath = path.join(viewsPath, `${view}.ejs`);
                 const ejs = require('ejs');
-                ejs.renderFile(viewPath, { ...data, req, res }, (err: Error | null, html: string) => {
-                    if (err) {
-                        console.error('Error renderizando vista:', err);
-                        return res.status(500).send('Error interno del servidor');
+                
+                // Agregar helpers de NodeWire para que estén disponibles en includes
+                const nodewireHelpers = {
+                    nodewireState: (component: any) => {
+                        return `<script type="application/json" data-nodewire-state="${component.id}" data-component-name="${component.name}">${JSON.stringify(component.getState())}</script>`;
+                    },
+                    nodewireId: (component: any) => {
+                        return component.id;
+                    },
+                    nodewireComponent: (component: any) => {
+                        return component.name;
                     }
-                    res.send(html);
-                });
+                };
+                
+                ejs.renderFile(
+                    viewPath, 
+                    { ...data, ...nodewireHelpers, req, res }, 
+                    {
+                        filename: viewPath,
+                        root: viewsPath
+                    },
+                    (err: Error | null, html: string) => {
+                        if (err) {
+                            console.error('Error renderizando vista:', err);
+                            return res.status(500).send('Error interno del servidor');
+                        }
+                        res.send(html);
+                    }
+                );
             };
             next();
         });
@@ -54,6 +76,10 @@ export class Application {
         const viewsPath = this.config.viewsPath || path.join(process.cwd(), 'resources/views');
         this.app.set('view engine', 'ejs');
         this.app.set('views', viewsPath);
+        
+        // Configurar EJS para que los helpers estén disponibles en includes
+        const ejs = require('ejs');
+        // Los helpers se agregarán en el método render
     }
 
     private setupNodeWire(): void {
