@@ -1,6 +1,7 @@
 import { Component } from './Component';
 import path from 'node:path';
-import ejs from 'ejs';
+import Handlebars from 'handlebars';
+import fs from 'node:fs';
 
 type ComponentConstructor = new (...args: any[]) => Component;
 
@@ -199,75 +200,176 @@ export class NodeWireManager {
     }
 
     /**
-     * Obtiene el motor de plantillas EJS configurado
+     * Obtiene el motor de plantillas Handlebars configurado
      */
     private getTemplateEngine(viewsPath?: string): any {
-            const effectiveViewsPath = viewsPath || this.viewsPath;
-            return {
-                render: (template: string, data: any): string => {
-                    // Sanitizar el nombre del template para evitar path traversal
-                    // Permitir barras pero eliminar .. y rutas absolutas
-                    let safeTemplate = template.replace(/\.\./g, '').replace(/^\/+/, '');
-                    // Normalizar separadores de ruta
-                    safeTemplate = safeTemplate.replace(/\\/g, '/');
-                    const templatePath = path.join(effectiveViewsPath, `${safeTemplate}.ejs`);
-                    const fs = require('node:fs');
-                    const templateContent = fs.readFileSync(templatePath, 'utf8');
-                    
-                    // Agregar helpers para NodeWire
-                    const component = data.component;
-                    const helpers = {
-                        nodewireState: (comp: any) => {
-                            return `<script type="application/json" data-nodewire-state="${comp.id}" data-component-name="${comp.name}">${JSON.stringify(comp.getState())}</script>`;
-                        },
-                        nodewireId: (comp: any) => {
-                            return comp.id;
-                        },
-                        nodewireComponent: (comp: any) => {
-                            return comp.name;
-                        },
-                        // Helper para marcar automáticamente elementos con propiedades del componente
-                        wire: (prop: string, content: any) => {
-                            if (!component) {
-                                console.warn('[NodeWire] wire() llamado sin componente disponible');
-                                return String(content || '');
-                            }
-                            const contentStr = String(content || '');
-                            const html = `<span data-nodewire-id="${component.id}" data-nodewire-prop="${prop}">${contentStr}</span>`;
-                            console.log(`[NodeWire] wire() generado para prop "${prop}":`, html);
-                            return html;
-                        }
-                    };
-                    
-                    let html = ejs.render(templateContent, { ...data, ...helpers });
-                    
-                    // Post-procesar el HTML para marcar automáticamente elementos que contienen component.propiedad
-                    if (component) {
-                        html = this.autoMarkComponentProperties(html, component);
+        const effectiveViewsPath = viewsPath || this.viewsPath;
+        
+        // Registrar helpers de Handlebars
+        Handlebars.registerHelper('nodewireState', (comp: any) => {
+            return new Handlebars.SafeString(
+                `<script type="application/json" data-nodewire-state="${comp.id}" data-component-name="${comp.name}">${JSON.stringify(comp.getState())}</script>`
+            );
+        });
+        
+        Handlebars.registerHelper('nodewireId', (comp: any) => {
+            return comp.id;
+        });
+        
+        Handlebars.registerHelper('nodewireComponent', (comp: any) => {
+            return comp.name;
+        });
+        
+        Handlebars.registerHelper('wire', (prop: string, content: any, options: any) => {
+            // En Handlebars, los helpers reciben los argumentos de forma diferente
+            const data = options.data ? options.data.root : options;
+            let component = data.component || 
+                          data.counterComponent ||
+                          (data as any).component;
+            
+            if (!component) {
+                for (const key in data) {
+                    const value = (data as any)[key];
+                    if (value && typeof value === 'object' && 'id' in value && 'name' in value && 'getState' in value) {
+                        component = value;
+                        break;
                     }
-                    
-                    return html;
                 }
-            };
+            }
+            
+            if (!component) {
+                console.warn('[NodeWire] wire() llamado sin componente disponible');
+                return new Handlebars.SafeString(String(content || ''));
+            }
+            
+            const contentStr = String(content || '');
+            const html = `<span data-nodewire-id="${component.id}" data-nodewire-prop="${prop}">${contentStr}</span>`;
+            console.log(`[NodeWire] wire() generado para prop "${prop}":`, html);
+            return new Handlebars.SafeString(html);
+        });
+        
+        return {
+            render: (template: string, data: any): string => {
+                // Sanitizar el nombre del template para evitar path traversal
+                // Permitir barras pero eliminar .. y rutas absolutas
+                let safeTemplate = template.replace(/\.\./g, '').replace(/^\/+/, '');
+                // Normalizar separadores de ruta
+                safeTemplate = safeTemplate.replace(/\\/g, '/');
+                const templatePath = path.join(effectiveViewsPath, `${safeTemplate}.hbs`);
+                
+                // Leer el template
+                const templateContent = fs.readFileSync(templatePath, 'utf8');
+                
+                // Compilar y renderizar con Handlebars
+                const compiledTemplate = Handlebars.compile(templateContent);
+                let html = compiledTemplate(data);
+                
+                // Post-procesar el HTML para marcar automáticamente elementos que contienen component.propiedad
+                const component = data.component;
+                if (component) {
+                    const htmlBefore = html;
+                    html = this.autoMarkComponentProperties(html, component);
+                    if (htmlBefore !== html) {
+                        console.log('[NodeWire] HTML marcado automáticamente. Cambios detectados.');
+                    } else {
+                        console.log('[NodeWire] No se detectaron cambios en el HTML después del auto-marcado.');
+                    }
+                }
+                
+                return html;
+            }
+        };
     }
 
     /**
      * Marca automáticamente los elementos que contienen propiedades del componente
      * Busca elementos que contengan valores del componente y los marca automáticamente
      */
-    private autoMarkComponentProperties(html: string, component: Component): string {
+    public autoMarkComponentProperties(html: string, component: Component): string {
         const state = component.getState();
         const componentId = component.id;
+        let markedCount = 0;
         
-        // Usar una expresión regular para encontrar elementos que podrían contener propiedades
-        // Esto es una aproximación - en la práctica, es mejor usar el helper wire() en las plantillas
-        // Pero podemos intentar marcar elementos que contienen valores conocidos
+        console.log('[NodeWire] Auto-marcando propiedades. Estado:', state, 'ComponentId:', componentId);
         
-        // Por ahora, retornamos el HTML sin modificar
-        // El desarrollador debe usar el helper wire() o data-attributes manualmente
-        // O podemos implementar un sistema más sofisticado de análisis de DOM
+        // Para cada propiedad del estado, buscar elementos que contengan ese valor
+        for (const [propName, propValue] of Object.entries(state)) {
+            // Convertir el valor a string para buscar en el HTML
+            const valueStr = String(propValue);
+            
+            console.log(`[NodeWire] Buscando elementos con valor "${valueStr}" para propiedad "${propName}"`);
+            
+            // Buscar elementos que contengan este valor exacto como contenido de texto
+            // Patrón mejorado: encontrar elementos HTML completos que contengan el valor
+            // Ejemplo: <div style="...">0</div> donde 0 es el valor de count
+            
+            // Primero, buscar elementos que contengan el valor exacto (sin espacios extra)
+            const exactValueRegex = new RegExp(
+                `(<([a-zA-Z][a-zA-Z0-9]*)(?![^>]*data-nodewire-prop)[^>]*>)\\s*${this.escapeRegex(valueStr)}\\s*(</\\2>)`,
+                'gi'
+            );
+            
+            html = html.replace(exactValueRegex, (match, openTag, tagName, closeTag) => {
+                // Verificar que el elemento no esté ya marcado
+                if (openTag.includes('data-nodewire-prop')) {
+                    return match;
+                }
+                
+                console.log(`[NodeWire] ✅ Marcando elemento exacto: ${tagName} con valor "${valueStr}"`);
+                markedCount++;
+                
+                // Agregar los atributos de NodeWire al tag de apertura
+                // Insertar antes del cierre del tag (>)
+                const newOpenTag = openTag.replace(
+                    />$/,
+                    ` data-nodewire-id="${componentId}" data-nodewire-prop="${propName}">`
+                );
+                
+                return `${newOpenTag}${valueStr}${closeTag}`;
+            });
+            
+            // También buscar elementos que contengan el valor pero con posible contenido adicional
+            // Esto maneja casos como <div>Count: 0</div>
+            const containsValueRegex = new RegExp(
+                `(<([a-zA-Z][a-zA-Z0-9]*)(?![^>]*data-nodewire-prop)[^>]*>)([^<]*${this.escapeRegex(valueStr)}[^<]*)(</\\2>)`,
+                'gi'
+            );
+            
+            html = html.replace(containsValueRegex, (match, openTag, tagName, content, closeTag) => {
+                // Verificar que el elemento no esté ya marcado (doble verificación)
+                if (openTag.includes('data-nodewire-prop')) {
+                    return match;
+                }
+                
+                // Solo marcar si el contenido contiene principalmente el valor
+                const trimmedContent = content.trim();
+                if (trimmedContent === valueStr || trimmedContent.endsWith(valueStr) || trimmedContent.startsWith(valueStr)) {
+                    console.log(`[NodeWire] ✅ Marcando elemento con contenido: ${tagName} con valor "${valueStr}"`);
+                    markedCount++;
+                    
+                    // Agregar los atributos de NodeWire
+                    const newOpenTag = openTag.replace(
+                        />$/,
+                        ` data-nodewire-id="${componentId}" data-nodewire-prop="${propName}">`
+                    );
+                    
+                    return `${newOpenTag}${content}${closeTag}`;
+                }
+                
+                return match;
+            });
+        }
+        
+        console.log(`[NodeWire] Total de elementos marcados: ${markedCount}`);
         
         return html;
+    }
+    
+    /**
+     * Escapa caracteres especiales para usar en expresiones regulares
+     */
+    private escapeRegex(str: string): string {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
     /**

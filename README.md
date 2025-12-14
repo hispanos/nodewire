@@ -9,7 +9,8 @@ framework/
 ├── lib/                    # Código del framework (publicable)
 │   ├── core/              # Núcleo del framework
 │   │   ├── Application.ts  # Clase principal de la aplicación
-│   │   └── Router.ts       # Sistema de rutas
+│   │   ├── Router.ts       # Sistema de rutas
+│   │   └── BaseController.ts # Controlador base
 │   ├── nodewire/          # Sistema NodeWire
 │   │   ├── Component.ts   # Clase base para componentes
 │   │   └── NodeWireManager.ts # Gestor de componentes
@@ -20,10 +21,11 @@ framework/
 ├── examples/               # Ejemplo de uso
 │   ├── src/
 │   │   ├── app/
+│   │   │   ├── controllers/ # Controladores
 │   │   │   └── Components/ # Componentes de ejemplo
 │   │   └── index.ts       # Punto de entrada del ejemplo
 │   ├── resources/
-│   │   └── views/         # Plantillas EJS
+│   │   └── views/         # Plantillas Handlebars (.hbs)
 │   ├── public/           # Archivos estáticos del ejemplo
 │   └── package.json
 └── package.json           # Configuración del framework
@@ -56,23 +58,41 @@ npm run dev
 
 ## 📦 Uso del Framework
 
-### 1. Importar el framework
+### 1. Crear una aplicación (con valores por defecto)
 
 ```typescript
-import { Application, Router, Component, NodeWireManager } from 'framework-mvc-nodewire';
-```
-
-### 2. Crear una aplicación
-
-```typescript
-import path from 'path';
 import { Application, Router } from 'framework-mvc-nodewire';
 
-const app = new Application({
-    viewsPath: path.join(__dirname, 'resources/views'),
-    publicPath: path.join(__dirname, 'public'),
-    staticPath: path.join(__dirname, 'public')
-});
+// Valores por defecto:
+// - views: resources/views
+// - controllers: app/controllers
+// - models: app/models
+// - public: public
+const app = new Application();
+```
+
+### 2. Crear un controlador
+
+```typescript
+import { BaseController } from 'framework-mvc-nodewire';
+import { CounterComponent } from '../Components/CounterComponent';
+
+export class HomeController extends BaseController {
+    // Declarar componentes que este controlador necesita
+    protected static components = {
+        'CounterComponent': CounterComponent
+    };
+
+    public async index() {
+        // Acceder a componentes con argumentos nombrados
+        const counterComponent = this.components.CounterComponent({ initialValue: 0 });
+        
+        this.render('welcome', {
+            title: 'Mi Aplicación',
+            counterComponent: counterComponent
+        });
+    }
+}
 ```
 
 ### 3. Crear un componente NodeWire
@@ -80,68 +100,163 @@ const app = new Application({
 ```typescript
 import { Component } from 'framework-mvc-nodewire';
 
-export class MiComponente extends Component {
-    public mensaje: string = 'Hola';
+export class CounterComponent extends Component {
+    public count: number = 0;
 
-    constructor(id?: string) {
-        super('MiComponente', id);
+    constructor(initialValue: number = 0, id?: string) {
+        super('CounterComponent', id);
+        this.count = initialValue;
     }
 
-    public cambiarMensaje(): void {
-        this.mensaje = 'Mensaje cambiado!';
+    public increment(): void {
+        this.count += 1;
+    }
+
+    public decrement(): void {
+        this.count -= 1;
+    }
+
+    public reset(): void {
+        this.count = 0;
     }
 
     public render(templateEngine: any): string {
-        return templateEngine.render('components/mi-componente', { component: this });
+        return templateEngine.render('components/counter', { component: this });
     }
 }
 ```
 
-### 4. Registrar y usar el componente
+### 4. Configurar rutas (súper simple!)
 
 ```typescript
-// Registrar el componente
-const nodeWireManager = app.getNodeWireManager();
-nodeWireManager.registerComponent('MiComponente', MiComponente);
+import { Router } from 'framework-mvc-nodewire';
+import { HomeController } from './app/controllers/HomeController';
 
-// En una ruta
-router.get('/', (req, res) => {
-    const componente = nodeWireManager.createComponent('MiComponente');
-    res.render('mi-vista', { componente });
-});
+const router = new Router();
+
+// Solo necesitas pasar la clase del controlador y el método
+// El Router se encarga de todo: crear instancia, registrar componentes, hacer bind
+router.get('/', HomeController, 'index');
+
+app.use(router);
+app.listen(3000);
 ```
 
-### 5. Crear la vista del componente
+### 5. Crear la vista con Handlebars
 
-```ejs
-<!-- resources/views/components/mi-componente.ejs -->
-<div 
-    data-nodewire-id="<%= component.id %>"
-    data-nodewire-state='<%= JSON.stringify(component.getState()) %>'
-    data-nodewire-name="<%= component.name %>"
->
-    <p><%= component.mensaje %></p>
-    <button data-nw-click="cambiarMensaje">Cambiar</button>
+```handlebars
+{{!-- resources/views/welcome.hbs --}}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{title}}</title>
+</head>
+<body>
+    <h1>{{title}}</h1>
+    
+    {{!-- Incluir el componente --}}
+    {{> components/counter component=counterComponent}}
+    
+    <script src="/js/nodewire-runtime.js"></script>
+</body>
+</html>
+```
+
+### 6. Crear la vista del componente
+
+```handlebars
+{{!-- resources/views/components/counter.hbs --}}
+{{!-- Helper para generar el estado automáticamente --}}
+{{{nodewireState component}}}
+
+<div style="text-align: center; padding: 30px;">
+    <h2>Contador NodeWire</h2>
+    
+    {{!-- El sistema detecta automáticamente elementos que contienen valores del componente --}}
+    {{!-- Solo necesitas usar {{component.count}} y el sistema lo marca automáticamente --}}
+    <div style="font-size: 48px; font-weight: bold;">
+        {{component.count}}
+    </div>
+
+    <div style="display: flex; gap: 10px; justify-content: center;">
+        {{!-- Los botones solo necesitan data-nw-click --}}
+        <button data-nw-click="decrement">-</button>
+        <button data-nw-click="reset">Reset</button>
+        <button data-nw-click="increment">+</button>
+    </div>
 </div>
 ```
 
-### 6. Incluir el runtime JavaScript
+## ✨ Características Principales
 
-```ejs
-<!-- En tu layout principal -->
-<script src="/js/nodewire-runtime.js"></script>
+### 🎯 Sintaxis Simplificada
+
+**Antes (con helper manual):**
+```handlebars
+{{{wire 'count' component.count}}}
 ```
 
-**Nota**: Cuando instales el paquete, copia el archivo `node_modules/framework-mvc-nodewire/lib/public/js/nodewire-runtime.js` a tu carpeta `public/js/`.
+**Ahora (detección automática):**
+```handlebars
+{{component.count}}
+```
+
+El sistema detecta automáticamente elementos que contienen valores del componente y los marca con los atributos necesarios para NodeWire.
+
+### 🚀 Configuración Simplificada
+
+**Antes:**
+```typescript
+const app = new Application({
+    viewsPath: path.join(__dirname, 'resources/views'),
+    publicPath: path.join(__dirname, 'public'),
+    staticPath: path.join(__dirname, 'public')
+});
+```
+
+**Ahora:**
+```typescript
+const app = new Application(); // Usa valores por defecto
+```
+
+### 🎨 Rutas Simplificadas
+
+**Antes:**
+```typescript
+const nodeWireManager = app.getNodeWireManager();
+const homeController = BaseController.createProxy(new HomeController(), nodeWireManager);
+router.get('/', homeController.index);
+```
+
+**Ahora:**
+```typescript
+router.get('/', HomeController, 'index');
+```
+
+### 🔄 Registro Automático de Componentes
+
+Los componentes se registran automáticamente cuando se declaran en el controlador:
+
+```typescript
+export class HomeController extends BaseController {
+    protected static components = {
+        'CounterComponent': CounterComponent
+    };
+    // El componente se registra automáticamente, no necesitas hacer nada más
+}
+```
 
 ## 🎯 Características
 
 - **Arquitectura MVC**: Patrón Modelo-Vista-Controlador
 - **NodeWire**: Sistema de componentes reactivos similar a Livewire
-- **Motor de plantillas EJS**: Para renderizar vistas
+- **Motor de plantillas Handlebars**: Sintaxis intuitiva y limpia
 - **TypeScript**: Tipado estático para mayor seguridad
 - **Express.js**: Servidor web robusto
-- **Configuración flexible**: Rutas personalizables para vistas y archivos estáticos
+- **WebSockets**: Comunicación en tiempo real (con fallback HTTP)
+- **Configuración por defecto**: Rutas automáticas sin configuración
+- **Detección automática**: Marca elementos automáticamente sin helpers manuales
+- **BaseController**: Controlador base con funcionalidades integradas
 
 ## 🔧 API del Framework
 
@@ -149,12 +264,15 @@ router.get('/', (req, res) => {
 
 ```typescript
 interface ApplicationConfig {
-    viewsPath?: string;    // Ruta a las vistas (default: process.cwd()/resources/views)
-    publicPath?: string;    // Ruta a archivos públicos
-    staticPath?: string;    // Ruta para archivos estáticos (default: process.cwd()/public)
+    viewsPath?: string;      // Default: process.cwd()/resources/views
+    publicPath?: string;     // Default: process.cwd()/public
+    staticPath?: string;     // Default: process.cwd()/public
+    controllersPath?: string; // Default: process.cwd()/app/controllers
+    modelsPath?: string;     // Default: process.cwd()/app/models
+    basePath?: string;       // Default: process.cwd()
 }
 
-const app = new Application(config);
+const app = new Application(config); // config es opcional
 app.use(router);
 app.listen(3000);
 ```
@@ -163,8 +281,35 @@ app.listen(3000);
 
 ```typescript
 const router = new Router();
-router.get('/ruta', (req, res) => { /* ... */ });
-router.post('/ruta', (req, res) => { /* ... */ });
+
+// Opción 1: Super simple (recomendado)
+router.get('/', HomeController, 'index');
+
+// Opción 2: Con instancia ya creada
+const controller = BaseController.createProxy(new HomeController(), nodeWireManager);
+router.get('/', controller.index);
+
+// Opción 3: Handler directo
+router.get('/', (req, res) => { /* ... */ });
+```
+
+### BaseController
+
+```typescript
+abstract class BaseController {
+    public req: Request | null;
+    public res: Response | null;
+    
+    // Declarar componentes
+    protected static components: Record<string, ComponentConstructor> = {};
+    
+    // Acceder a componentes
+    protected get components(): Record<string, (options?: Record<string, any>) => Component>;
+    
+    // Métodos helper
+    protected render(view: string, data?: any): void;
+    protected json(data: any, status?: number): void;
+}
 ```
 
 ### Component
@@ -180,13 +325,14 @@ abstract class Component {
 }
 ```
 
-### NodeWireManager
+### Helpers de Handlebars
 
-```typescript
-const manager = app.getNodeWireManager();
-manager.registerComponent('Nombre', ComponentClass);
-const component = manager.createComponent('Nombre', ...args);
-```
+NodeWire proporciona helpers automáticos para Handlebars:
+
+- `{{nodewireState component}}` - Genera el script de estado del componente
+- `{{nodewireId component}}` - Obtiene el ID del componente
+- `{{nodewireComponent component}}` - Obtiene el nombre del componente
+- `{{component.propiedad}}` - Se marca automáticamente (no necesitas helper)
 
 ## 📝 Ejemplo Completo
 
@@ -197,9 +343,10 @@ Ver la carpeta `examples/` para un ejemplo completo y funcional.
 - [ ] Soporte para eventos personalizados
 - [ ] Validación de formularios
 - [ ] Sistema de sesiones persistente
-- [ ] Optimización de actualizaciones del DOM (diffing)
+- [ ] Optimización de actualizaciones del DOM (diffing mejorado)
 - [ ] Soporte para múltiples componentes en la misma página
 - [ ] Script de instalación para copiar el runtime JS automáticamente
+- [ ] Hot reload para desarrollo
 
 ## 📄 Licencia
 
