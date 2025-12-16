@@ -51,20 +51,16 @@
     </style>
 </head>
 <body>
-    {{!-- Topbar personalizado - el contenedor solo se renderiza si la sección existe --}}
-    {{#@section "topbar"}}
+    {{!-- Topbar personalizado - el contenido se renderiza dentro del div --}}
     <div class="topbar">
-        {{{content}}}
+        {{#@section "topbar"}}{{/@section}}
     </div>
-    {{/@section}}
     
     <div class="main-container">
-        {{!-- Sidebar personalizado - el contenedor solo se renderiza si la sección existe --}}
-        {{#@section "sidebar"}}
+        {{!-- Sidebar personalizado - el contenido se renderiza dentro del aside --}}
         <aside class="sidebar">
-            {{{content}}}
+            {{#@section "sidebar"}}{{/@section}}
         </aside>
-        {{/@section}}
         
         {{!-- Contenido principal --}}
         <main class="content-area">
@@ -72,12 +68,10 @@
         </main>
     </div>
     
-    {{!-- Footer personalizado - el contenedor solo se renderiza si la sección existe --}}
-    {{#@section "footer"}}
+    {{!-- Footer personalizado - el contenido se renderiza dentro del footer --}}
     <footer class="footer">
-        {{{content}}}
+        {{#@section "footer"}}{{/@section}}
     </footer>
-    {{/@section}}
 
     <script src="/js/nodewire-runtime.js"></script>
 </body>

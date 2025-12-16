@@ -62,21 +62,19 @@
 </head>
 <body>
     {{!-- Usar @section con bloque - el contenedor solo se renderiza si la sección existe --}}
-    {{!-- Dentro del bloque, usar {{{content}}} para acceder al contenido de la sección --}}
-    {{#@section "header"}}
+    {{!-- El contenido de la sección se renderiza dentro del contenedor --}}
     <header class="header">
         <div class="header-content">
-            {{{content}}}
+            {{#@section "header"}}{{/@section}}
         </div>
     </header>
-    {{/@section}}
     
-    {{!-- Ejemplo de sidebar - el helper @section maneja la validación internamente --}}
-    {{#@section "sidebar"}}
+    {{!-- Ejemplo de sidebar - el contenido se renderiza dentro del aside --}}
+    {{#if (lookup _sections "sidebar")}}
     <aside class="sidebar" style="position: fixed; left: 0; top: 0; width: 250px; height: 100vh; background: rgba(255,255,255,0.9); padding: 20px;">
-        {{{content}}}
+        {{#@section "sidebar"}}{{/@section}}
     </aside>
-    {{/@section}}
+    {{/if}}
     
     <main class="main-content" {{#if (lookup _sections "sidebar")}}style="margin-left: 250px;"{{/if}}>
         <div class="content-wrapper">
@@ -84,14 +82,12 @@
         </div>
     </main>
     
-    {{!-- Footer - el helper @section maneja la validación internamente --}}
-    {{#@section "footer"}}
+    {{!-- Footer - el contenido se renderiza dentro del footer --}}
     <footer class="footer">
         <div class="footer-content">
-            {{{content}}}
+            {{#@section "footer"}}{{/@section}}
         </div>
     </footer>
-    {{/@section}}
 
     <script src="/js/nodewire-runtime.js"></script>
 </body>

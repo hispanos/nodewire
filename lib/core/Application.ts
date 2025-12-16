@@ -66,8 +66,15 @@ export class Application {
                     // Si hay un layout, primero renderizar la vista y luego el layout
                     const viewToRender = layout.view || view;
                     
+                    // Agregar referencias necesarias para helpers en los datos de la vista
+                    const viewData = {
+                        ...data,
+                        _nodeWireManager: this.nodeWireManager,
+                        _viewsPath: this.config.viewsPath
+                    };
+                    
                     // Renderizar la vista primero
-                    originalRender(viewToRender, data, (err: Error, viewHtml: string) => {
+                    originalRender(viewToRender, viewData, (err: Error, viewHtml: string) => {
                         if (err) {
                             console.error(`[Layout] Error renderizando vista ${viewToRender}:`, err);
                             if (callback) callback(err, '');
@@ -187,7 +194,9 @@ export class Application {
                         const layoutData = {
                             ...data,
                             _content: contentHtml,
-                            _sections: renderedSections
+                            _sections: renderedSections,
+                            _nodeWireManager: this.nodeWireManager,
+                            _viewsPath: this.config.viewsPath
                         };
                         
                         // Debug: verificar que _content esté en layoutData
@@ -245,7 +254,13 @@ export class Application {
                     });
                 } else {
                     // Renderizar normalmente sin layout
-                    originalRender(view, data, (err: Error, html: string) => {
+                    // Agregar referencias necesarias para helpers
+                    const viewData = {
+                        ...data,
+                        _nodeWireManager: this.nodeWireManager,
+                        _viewsPath: this.config.viewsPath
+                    };
+                    originalRender(view, viewData, (err: Error, html: string) => {
                         if (err) {
                             if (callback) callback(err, '');
                             return;
@@ -342,9 +357,10 @@ export class Application {
                 },
                 // Helper para renderizar cualquier sección del layout
                 // Uso simple: {{@section 'nombreSeccion'}} - devuelve la sección o cadena vacía
-                // Uso con bloque: {{#@section "nombre"}}<div>{{{.}}}</div>{{/@section}}
+                // Uso con bloque: {{#@section "nombre"}}<div>...</div>{{/@section}}
                 //   - El bloque solo se renderiza si la sección existe
-                //   - Dentro del bloque, {{{.}}} contiene el contenido de la sección
+                //   - El contenido de la sección se inserta automáticamente dentro del bloque
+                //   - No es necesario usar {{{content}}}, el contenido se inserta directamente
                 '@section': function(sectionName: any, options?: any) {
                     try {
                         // Manejar caso donde no hay options
@@ -386,17 +402,10 @@ export class Application {
                                 return '';
                             }
                             
-                            // Crear un contexto donde el contenido esté disponible como "content"
-                            // Mantener todas las propiedades del contexto original
-                            const context = {
-                                ...data,
-                                content: sectionContent
-                            };
-                            
-                            // Renderizar el bloque con el contexto
-                            const result = options.fn(context);
-                            
-                            return new Handlebars.SafeString(result);
+                            // Cuando se usa como bloque, simplemente devolver el contenido de la sección
+                            // El HTML del contenedor debe estar fuera del bloque
+                            // Ejemplo: <aside>{{#@section "sidebar"}}{{/@section}}</aside>
+                            return new Handlebars.SafeString(sectionContent);
                         } else {
                             // Helper simple: devolver el contenido de la sección o cadena vacía
                             if (typeof sectionContent !== 'string') {
@@ -423,6 +432,67 @@ export class Application {
                     } catch (error: any) {
                         console.error(`[Layout] Error en helper @hasSection para sección "${sectionName}":`, error);
                         return false;
+                    }
+                } as any,
+                // Helper para renderizar un componente NodeWire automáticamente
+                // Uso: {{@component "counterComponent"}}
+                // Busca el componente en el contexto de datos y lo renderiza automáticamente
+                // No requiere pasar argumentos porque el componente ya tiene sus argumentos definidos en el TS
+                '@component': function(componentName: string, options: any) {
+                    try {
+                        // Obtener el contexto de datos
+                        const data = (options && options.data && options.data.root) ? options.data.root : {};
+                        
+                        // Debug: verificar qué datos están disponibles
+                        console.log(`[Component] Buscando componente "${componentName}" en contexto:`, {
+                            availableKeys: Object.keys(data),
+                            hasComponent: !!data[componentName],
+                            componentType: data[componentName] ? typeof data[componentName] : 'undefined'
+                        });
+                        
+                        // Buscar el componente en el contexto de datos
+                        const component = data[componentName];
+                        
+                        if (!component) {
+                            console.warn(`[Component] Componente "${componentName}" no encontrado en el contexto de datos. Claves disponibles:`, Object.keys(data));
+                            return '';
+                        }
+                        
+                        // Verificar que sea un componente válido (tiene método render)
+                        if (typeof component !== 'object' || !component.render || typeof component.render !== 'function') {
+                            console.error(`[Component] "${componentName}" no es un componente válido (no tiene método render)`);
+                            return '';
+                        }
+                        
+                        // Obtener el NodeWireManager y el template engine
+                        // Necesitamos acceso a la instancia de Application para obtener nodeWireManager
+                        // Usamos una referencia almacenada en el contexto de la aplicación
+                        const nodeWireManager = (options.data && options.data.root && (options.data.root as any)._nodeWireManager) 
+                            || (data as any)._nodeWireManager;
+                        
+                        if (!nodeWireManager) {
+                            console.error(`[Component] NodeWireManager no disponible para renderizar componente "${componentName}"`);
+                            return '';
+                        }
+                        
+                        // Obtener el template engine
+                        const viewsPath = (options.data && options.data.root && (options.data.root as any)._viewsPath) 
+                            || (data as any)._viewsPath;
+                        const templateEngine = nodeWireManager.getTemplateEngine(viewsPath);
+                        
+                        // Renderizar el componente
+                        const html = component.render(templateEngine);
+                        
+                        // Asegurar que sea un string
+                        const htmlStr = typeof html === 'string' ? html : String(html || '');
+                        
+                        return new Handlebars.SafeString(htmlStr);
+                    } catch (error: any) {
+                        console.error(`[Component] Error al renderizar componente "${componentName}":`, error);
+                        if (error.stack) {
+                            console.error('[Component] Stack:', error.stack);
+                        }
+                        return '';
                     }
                 } as any,
                 // Helper para renderizar el contenido principal en un layout
