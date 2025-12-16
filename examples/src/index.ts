@@ -14,6 +14,7 @@ const router = new Router();
 // Solo necesitas pasar la clase del controlador y el nombre del método
 // El Router se encarga de todo: crear instancia, registrar componentes, hacer bind
 router.get('/', HomeController, 'index');
+router.get('/test-blade', HomeController, 'testBlade');
 
 // Registrar rutas en la aplicación
 app.use(router);

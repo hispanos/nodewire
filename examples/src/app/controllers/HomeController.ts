@@ -57,4 +57,17 @@ export class HomeController extends BaseController {
         //     }
         // });
     }
+
+    public async testBlade() {
+        // Probar el motor Blade
+        this.renderBlade('test', {
+            title: 'Test del Motor Blade',
+            message: '¡Funciona correctamente!',
+            number: 42,
+            showMessage: true,
+            htmlContent: '<strong>Este es HTML sin escape</strong>',
+            example: {example1: 'example1', example2: 'example2'},
+            data: {test: 'test', test2: 'test2'}
+        });
+    }
 }

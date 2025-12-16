@@ -101,6 +101,7 @@ export abstract class BaseController {
                     prop !== 'bind' && 
                     prop !== 'constructor' &&
                     prop !== 'render' &&
+                    prop !== 'renderBlade' &&
                     prop !== 'json' &&
                     prop !== 'createComponent' &&
                     prop !== 'getNodeWireManager' &&
@@ -157,6 +158,77 @@ export abstract class BaseController {
         } else {
             // Renderizar la vista normalmente
             this.res.render(view, data);
+        }
+    }
+
+    /**
+     * Renderiza una vista usando Blade
+     * @param view Nombre de la vista Blade (sin extensión)
+     * @param data Datos a pasar a la vista
+     * @param options Opciones adicionales:
+     *   - layout: Nombre del layout Blade a usar
+     *   - sections: Objeto con secciones personalizadas del layout
+     */
+    protected renderBlade(
+        view: string,
+        data: any = {},
+        options?: {
+            layout?: string;
+            sections?: Record<string, any>;
+        }
+    ): void {
+        if (!this.res) {
+            throw new Error('Response no disponible');
+        }
+
+        const app = (this.req as any)?.app;
+        const bladeEngine = (app?.locals as any)?.bladeEngine;
+
+        if (!bladeEngine) {
+            throw new Error('BladeEngine no disponible. Asegúrate de que Application esté configurado correctamente.');
+        }
+
+        try {
+            // Si hay layout, preparar datos con secciones
+            if (options?.layout) {
+                // Preparar secciones renderizadas
+                const renderedSections: Record<string, string> = {};
+                const sections = options.sections || {};
+
+                for (const [sectionName, sectionContent] of Object.entries(sections)) {
+                    if (typeof sectionContent === 'string') {
+                        // Es una ruta de vista
+                        renderedSections[sectionName] = bladeEngine.render(sectionContent, data);
+                    } else if (sectionContent && typeof sectionContent === 'object' && 'render' in sectionContent) {
+                        // Es un componente NodeWire
+                        const nodeWireManager = this.getNodeWireManager();
+                        if (nodeWireManager) {
+                            const templateEngine = nodeWireManager.getTemplateEngine();
+                            renderedSections[sectionName] = sectionContent.render(templateEngine);
+                        }
+                    }
+                }
+
+                // Renderizar la vista principal
+                const viewContent = bladeEngine.render(view, data);
+
+                // Renderizar el layout con secciones y contenido
+                const layoutData = {
+                    ...data,
+                    _sections: renderedSections,
+                    _content: viewContent
+                };
+
+                const html = bladeEngine.render(`layouts/${options.layout}`, layoutData);
+                this.res.send(html);
+            } else {
+                // Renderizar sin layout
+                const html = bladeEngine.render(view, data);
+                this.res.send(html);
+            }
+        } catch (error: any) {
+            console.error(`[Blade] Error renderizando vista ${view}:`, error);
+            this.res.status(500).send(`Error renderizando vista: ${error.message}`);
         }
     }
 
@@ -254,22 +326,29 @@ export abstract class BaseController {
      * Uso: router.get('/', controller.bind('index'))
      * O: router.get('/', 'index', controller)
      */
-    public bind(methodName: keyof this): (req: Request, res: Response) => void | Promise<void> {
+    public bind(methodName: keyof this): (req?: Request, res?: Response) => void | Promise<void> {
         const method = this[methodName];
         if (typeof method !== 'function') {
             throw new Error(`El método ${String(methodName)} no existe o no es una función`);
         }
 
         // Marcar esta función como bindeada de un controlador
-        const boundMethod = async (req: Request, res: Response) => {
-            this.req = req;
-            this.res = res;
+        const boundMethod = async (req?: Request, res?: Response) => {
+            // Si se pasan req y res, usarlos; si no, usar los que ya están en la instancia
+            if (req) this.req = req;
+            if (res) this.res = res;
+            
+            // Verificar que req y res estén disponibles
+            if (!this.req || !this.res) {
+                throw new Error('Request y Response deben estar disponibles');
+            }
+            
             try {
-                await (method as any).call(this, req, res);
+                await (method as any).call(this);
             } catch (error: any) {
                 console.error(`Error en ${this.constructor.name}.${String(methodName)}:`, error);
-                if (!res.headersSent) {
-                    res.status(500).send('Error interno del servidor');
+                if (this.res && !this.res.headersSent) {
+                    this.res.status(500).send('Error interno del servidor');
                 }
             }
         };

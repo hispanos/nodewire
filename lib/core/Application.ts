@@ -6,6 +6,7 @@ import { NodeWireManager } from '../nodewire/NodeWireManager';
 import { Router } from './Router';
 import { create } from 'express-handlebars';
 import Handlebars from 'handlebars';
+import { BladeEngine } from '../blade/BladeEngine';
 
 export interface ApplicationConfig {
     viewsPath?: string;
@@ -21,6 +22,7 @@ export class Application {
     private httpServer: HttpServer | null = null;
     private wss: WebSocketServer | null = null;
     private nodeWireManager: NodeWireManager;
+    private bladeEngine: BladeEngine | null = null;
     private config: ApplicationConfig;
 
     constructor(config: ApplicationConfig = {}) {
@@ -38,6 +40,13 @@ export class Application {
             basePath: basePath
         };
         
+        // Inicializar BladeEngine con el viewsPath (ya sea explícito o por defecto)
+        // this.config.viewsPath siempre será un string debido al valor por defecto
+        this.bladeEngine = new BladeEngine({
+            viewsPath: this.config.viewsPath!,
+            cacheEnabled: false // Deshabilitar cache en desarrollo
+        });
+        
         this.setupMiddleware();
         this.setupViewEngine();
         this.setupNodeWire();
@@ -51,8 +60,9 @@ export class Application {
         // Servir archivos estáticos
         this.app.use(express.static(this.config.staticPath!));
 
-        // Exponer NodeWireManager en app.locals para que los controladores puedan acceder
+        // Exponer NodeWireManager y BladeEngine en app.locals para que los controladores puedan acceder
         this.app.locals.nodeWireManager = this.nodeWireManager;
+        this.app.locals.bladeEngine = this.bladeEngine;
 
         // Interceptar res.render para aplicar auto-marcado de NodeWire y soportar layouts
         this.app.use((req: Request, res: Response, next: NextFunction) => {
@@ -70,7 +80,8 @@ export class Application {
                     const viewData = {
                         ...data,
                         _nodeWireManager: this.nodeWireManager,
-                        _viewsPath: this.config.viewsPath
+                        _viewsPath: this.config.viewsPath,
+                        _sectionBlocks: {} // Inicializar objeto para almacenar contenido de bloques
                     };
                     
                     // Renderizar la vista primero
@@ -89,11 +100,54 @@ export class Application {
                             preview: typeof viewHtml === 'string' ? viewHtml.substring(0, 150) : String(viewHtml)
                         });
                         
+                        // Inicializar objeto para almacenar contenido de bloques si no existe
+                        if (!viewData._sectionBlocks) {
+                            viewData._sectionBlocks = {};
+                        }
+                        
+                        // Pre-renderizar el layout síncronamente para capturar los bloques de las secciones
+                        // Esto permite que el contenido dentro de {{#@section}}...{{/@section}} esté disponible como {{_content}}
+                        try {
+                            const templateEngine = this.nodeWireManager.getTemplateEngine(this.config.viewsPath);
+                            // IMPORTANTE: Crear un objeto que mantenga la referencia a _sectionBlocks
+                            // No usar spread porque podría copiar la referencia incorrecta
+                            const layoutDataForBlocks: any = {
+                                ...data,
+                                _content: typeof viewHtml === 'string' ? viewHtml : String(viewHtml || ''),
+                                _sections: {},
+                                _nodeWireManager: this.nodeWireManager,
+                                _viewsPath: this.config.viewsPath
+                            };
+                            // CRÍTICO: Asignar la referencia después del spread para asegurar que sea la correcta
+                            layoutDataForBlocks._sectionBlocks = viewData._sectionBlocks;
+                            
+                            console.log('[Layout] Pre-renderizando layout para capturar bloques, _sectionBlocks:', {
+                                isSameReference: layoutDataForBlocks._sectionBlocks === viewData._sectionBlocks,
+                                viewDataBlocks: Object.keys(viewData._sectionBlocks || {}),
+                                layoutDataBlocks: Object.keys(layoutDataForBlocks._sectionBlocks || {})
+                            });
+                            
+                            // Pre-renderizar el layout solo para capturar los bloques
+                            templateEngine.render(`layouts/${layout.name}`, layoutDataForBlocks);
+                            // Los bloques ahora están en viewData._sectionBlocks (misma referencia)
+                            
+                            // Debug: verificar qué bloques se capturaron
+                            console.log('[Layout] Bloques capturados:', Object.keys(viewData._sectionBlocks || {}).map(k => ({
+                                name: k,
+                                hasContent: !!viewData._sectionBlocks[k],
+                                length: typeof viewData._sectionBlocks[k] === 'string' ? viewData._sectionBlocks[k].length : 'N/A',
+                                preview: typeof viewData._sectionBlocks[k] === 'string' ? viewData._sectionBlocks[k].substring(0, 50) : String(viewData._sectionBlocks[k])
+                            })));
+                        } catch (preRenderErr) {
+                            console.warn(`[Layout] Error en pre-renderizado para capturar bloques:`, preRenderErr);
+                        }
+                        
                         // Renderizar todas las secciones del layout
                         const sections = layout.sections || {};
                         const renderedSections: Record<string, string> = {};
                         
                         // Función helper para renderizar una sección
+                        // IMPORTANTE: Usar viewData._sectionBlocks que tiene los bloques capturados
                         const renderSection = (sectionName: string, sectionContent: any): string => {
                             if (!sectionContent) {
                                 return '';
@@ -116,8 +170,24 @@ export class Application {
                             if (typeof sectionContent === 'string') {
                                 try {
                                     const templateEngine = this.nodeWireManager.getTemplateEngine(this.config.viewsPath);
+                                    // Preparar datos para la vista de la sección, incluyendo _content del bloque si existe
+                                    // Usar viewData._sectionBlocks que tiene los bloques capturados del pre-renderizado
+                                    const blockContent = (viewData._sectionBlocks && viewData._sectionBlocks[sectionName]) || '';
+                                    const sectionData = {
+                                        ...data,
+                                        _content: blockContent
+                                    };
+                                    
+                                    // Debug: verificar qué se está pasando
+                                    console.log(`[Layout] Renderizando sección ${sectionName} con _content:`, {
+                                        hasBlockContent: !!blockContent,
+                                        blockContentLength: typeof blockContent === 'string' ? blockContent.length : 'N/A',
+                                        blockContentPreview: typeof blockContent === 'string' ? blockContent.substring(0, 100) : String(blockContent),
+                                        availableBlocks: Object.keys(viewData._sectionBlocks || {})
+                                    });
+                                    
                                     // Pasar todos los datos para que las partials tengan acceso al contexto completo
-                                    const html = templateEngine.render(sectionContent, data);
+                                    const html = templateEngine.render(sectionContent, sectionData);
                                     
                                     // Debug: verificar qué devuelve
                                     console.log(`[Layout] Renderizando sección ${sectionName} (${sectionContent}):`, {
@@ -196,7 +266,8 @@ export class Application {
                             _content: contentHtml,
                             _sections: renderedSections,
                             _nodeWireManager: this.nodeWireManager,
-                            _viewsPath: this.config.viewsPath
+                            _viewsPath: this.config.viewsPath,
+                            _sectionBlocks: viewData._sectionBlocks || {}
                         };
                         
                         // Debug: verificar que _content esté en layoutData
@@ -216,9 +287,16 @@ export class Application {
                                 return;
                             }
                             
-                            if (layoutHtml) {
+                            // Reemplazar los marcadores de secciones con el contenido renderizado
+                            let processedLayoutHtml = layoutHtml;
+                            for (const [sectionName, renderedContent] of Object.entries(renderedSections)) {
+                                const marker = `<!--@SECTION:${sectionName}@-->`;
+                                processedLayoutHtml = processedLayoutHtml.replace(marker, renderedContent);
+                            }
+                            
+                            if (processedLayoutHtml) {
                                 // Post-procesar el HTML para aplicar auto-marcado de NodeWire
-                                let processedHtml = layoutHtml;
+                                let processedHtml = processedLayoutHtml;
                                 
                                 // Buscar TODOS los componentes en los datos (no solo el primero)
                                 const components: any[] = [];
@@ -385,27 +463,56 @@ export class Application {
                         
                         // Si es un helper de bloque (tiene options.fn)
                         if (options && typeof options.fn === 'function') {
-                            // Si la sección no existe, no renderizar nada
-                            if (!sectionContent) {
-                                return '';
-                            }
+                            // Capturar el contenido del bloque (lo que está dentro de {{#@section}}...{{/@section}})
+                            // Este contenido estará disponible como {{_content}} dentro de la vista de la sección
+                            const blockContent = options.fn(data);
                             
-                            // Asegurar que sectionContent sea un string
-                            if (typeof sectionContent !== 'string') {
-                                console.error(`[Layout] Helper @section: sección "${sectionName}" no es un string, es ${typeof sectionContent}:`, sectionContent);
-                                return '';
-                            }
+                            // Debug: verificar qué contenido se capturó
+                            console.log(`[Layout] Helper @section capturando bloque para "${sectionName}":`, {
+                                blockContentLength: typeof blockContent === 'string' ? blockContent.length : 'N/A',
+                                blockContentPreview: typeof blockContent === 'string' ? blockContent.substring(0, 100) : String(blockContent),
+                                hasSectionBlocks: !!data._sectionBlocks
+                            });
                             
-                            // Verificar que no sea "[object Object]"
-                            if (sectionContent === '[object Object]' || sectionContent.startsWith('[object ')) {
-                                console.error(`[Layout] Helper @section: sección "${sectionName}" contiene objeto convertido a string`);
-                                return '';
+                            // Almacenar el contenido del bloque para que esté disponible cuando se renderice la sección
+                            if (!data._sectionBlocks) {
+                                data._sectionBlocks = {};
+                                console.warn(`[Layout] Helper @section: _sectionBlocks no existe, creando nuevo objeto para "${sectionName}"`);
                             }
+                            data._sectionBlocks[sectionName] = blockContent;
                             
-                            // Cuando se usa como bloque, simplemente devolver el contenido de la sección
-                            // El HTML del contenedor debe estar fuera del bloque
-                            // Ejemplo: <aside>{{#@section "sidebar"}}{{/@section}}</aside>
-                            return new Handlebars.SafeString(sectionContent);
+                            // Debug: verificar que se almacenó correctamente
+                            console.log(`[Layout] Bloque almacenado para "${sectionName}":`, {
+                                stored: !!data._sectionBlocks[sectionName],
+                                storedLength: typeof data._sectionBlocks[sectionName] === 'string' ? data._sectionBlocks[sectionName].length : 'N/A',
+                                storedPreview: typeof data._sectionBlocks[sectionName] === 'string' ? data._sectionBlocks[sectionName].substring(0, 50) : String(data._sectionBlocks[sectionName]),
+                                allBlocks: Object.keys(data._sectionBlocks),
+                                isSameObject: data._sectionBlocks === (options.data && options.data.root && (options.data.root as any)._sectionBlocks)
+                            });
+                            
+                            // Si hay contenido en la sección, renderizarlo (la vista de la sección puede usar {{_content}} para acceder al bloque)
+                            if (sectionContent) {
+                                // Asegurar que sectionContent sea un string
+                                if (typeof sectionContent !== 'string') {
+                                    console.error(`[Layout] Helper @section: sección "${sectionName}" no es un string, es ${typeof sectionContent}:`, sectionContent);
+                                    // Si la sección no es válida, usar el contenido del bloque como fallback
+                                    return new Handlebars.SafeString(blockContent);
+                                }
+                                
+                                // Verificar que no sea "[object Object]"
+                                if (sectionContent === '[object Object]' || sectionContent.startsWith('[object ')) {
+                                    console.error(`[Layout] Helper @section: sección "${sectionName}" contiene objeto convertido a string`);
+                                    // Si la sección no es válida, usar el contenido del bloque como fallback
+                                    return new Handlebars.SafeString(blockContent);
+                                }
+                                
+                                // El contenido de la sección se renderizará en renderSection, donde se pasará _content
+                                // Por ahora, devolver un marcador temporal que será reemplazado cuando se renderice la sección
+                                return new Handlebars.SafeString(`<!--@SECTION:${sectionName}@-->`);
+                            } else {
+                                // Si no hay contenido en la sección, renderizar el contenido del bloque (contenido por defecto)
+                                return new Handlebars.SafeString(blockContent);
+                            }
                         } else {
                             // Helper simple: devolver el contenido de la sección o cadena vacía
                             if (typeof sectionContent !== 'string') {
