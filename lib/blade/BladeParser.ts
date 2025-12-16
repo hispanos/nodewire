@@ -37,9 +37,6 @@ export class BladeParser {
             currentContent = currentContent.replace(extendsMatch[0], '');
         }
 
-        // Procesar @yield primero (en layouts)
-        currentContent = this.processYields(currentContent);
-
         // Procesar @section/@endsection
         currentContent = this.processSections(currentContent, result);
 
@@ -49,6 +46,10 @@ export class BladeParser {
         // Procesar @slot/@endslot
         currentContent = this.processSlots(currentContent, result);
 
+        // Procesar @yield ANTES de las condicionales (en layouts)
+        // Esto asegura que @yield se procese antes de que las condicionales generen template literals
+        currentContent = this.processYields(currentContent);
+
         // Procesar @if/@elseif/@else/@endif
         currentContent = this.processConditionals(currentContent);
 
@@ -57,6 +58,9 @@ export class BladeParser {
 
         // Procesar @include
         currentContent = this.processIncludes(currentContent, viewsPath);
+
+        // Procesar directivas NodeWire (@nodewireState, @wire)
+        currentContent = this.processNodeWireDirectives(currentContent);
 
         // Procesar variables {{ $var }} y {!! $var !!}
         currentContent = this.processVariables(currentContent);
@@ -69,10 +73,36 @@ export class BladeParser {
 
     private processYields(content: string): string {
         // @yield('sectionName') o @yield('sectionName', 'default')
-        const yieldRegex = /@yield\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"])?\s*\)/g;
-        return content.replace(yieldRegex, (match, sectionName, defaultValue) => {
-            return `\${(data._sections && data._sections['${sectionName}']) || '${defaultValue || ''}'}`;
-        });
+        // Procesar con comillas simples y dobles, manejando valores vacíos
+        // Usar un regex más flexible que capture espacios opcionales
+        const yieldRegex = /@yield\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]*)['"])?\s*\)/g;
+        let lastIndex = 0;
+        let result = '';
+        let match;
+        
+        while ((match = yieldRegex.exec(content)) !== null) {
+            // Agregar texto antes del match
+            result += content.substring(lastIndex, match.index);
+            
+            const sectionName = match[1];
+            const defaultValue = match[2] !== undefined ? match[2] : '';
+            
+            // Generar la expresión JavaScript
+            const expression = `\${(data._sections && data._sections['${sectionName}']) || '${defaultValue.replace(/'/g, "\\'")}'}`;
+            result += expression;
+            
+            lastIndex = match.index + match[0].length;
+        }
+        
+        // Agregar el texto restante
+        result += content.substring(lastIndex);
+        content = result;
+        
+        // @content - renderiza el contenido principal del layout
+        // Usar \b para asegurar que sea una palabra completa
+        content = content.replace(/@content\b/g, '${data._content || \'\'}');
+        
+        return content;
     }
 
     private processSections(content: string, result: ParsedTemplate): string {
@@ -244,6 +274,23 @@ export class BladeParser {
         }
 
         return processed;
+    }
+
+    private processNodeWireDirectives(content: string): string {
+        // @nodewireState(component) - genera el script de estado del componente
+        content = content.replace(/@nodewireState\s*\(\s*([^)]+)\s*\)/g, (match, componentExpr) => {
+            const jsExpr = this.convertBladeExpression(componentExpr.trim());
+            // Generar código en una sola línea para evitar problemas con múltiples líneas
+            return `\${(function(){const c=${jsExpr};const s=JSON.stringify(c.getState());return'<script type="application/json" data-nodewire-state="'+c.id+'" data-component-name="'+c.name+'">'+s+'</script>';})()}`;
+        });
+
+        // @component(componentName) - renderiza un componente NodeWire
+        // Busca el componente en el contexto de datos y lo renderiza
+        content = content.replace(/@component\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (match, componentName) => {
+            return `\${(function(){const c=data.${componentName};if(!c||typeof c!=='object'||!c.render||typeof c.render!=='function'){return'';}const nwm=data._nodeWireManager;if(!nwm){return'';}const te=nwm.getTemplateEngine(data._viewsPath);return c.render(te);})()}`;
+        });
+
+        return content;
     }
 
     private processVariables(content: string): string {

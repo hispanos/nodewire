@@ -124,8 +124,8 @@ export abstract class BaseController {
     }
 
     /**
-     * Renderiza una vista
-     * @param view Nombre de la vista a renderizar
+     * Renderiza una vista usando Blade
+     * @param view Nombre de la vista a renderizar (sin extensión .view)
      * @param data Datos a pasar a la vista
      * @param options Opciones adicionales:
      *   - layout: Nombre del layout a usar (ej: 'app', 'admin')
@@ -141,24 +141,8 @@ export abstract class BaseController {
             sections?: Record<string, any>;
         }
     ): void {
-        if (!this.res) {
-            throw new Error('Response no disponible');
-        }
-        
-        // Si se especifica un layout, preparar los datos para el layout
-        if (options?.layout) {
-            // Agregar información del layout a los datos
-            data._layout = {
-                name: options.layout,
-                view: view,
-                sections: options.sections || {}
-            };
-            // Renderizar el layout en lugar de la vista directamente
-            this.res.render(`layouts/${options.layout}`, data);
-        } else {
-            // Renderizar la vista normalmente
-            this.res.render(view, data);
-        }
+        // Usar renderBlade por defecto
+        this.renderBlade(view, data, options);
     }
 
     /**
@@ -189,6 +173,17 @@ export abstract class BaseController {
         }
 
         try {
+            // Agregar referencias necesarias para helpers en los datos
+            const nodeWireManager = this.getNodeWireManager();
+            const app = (this.req as any)?.app;
+            const viewsPath = (app?.locals as any)?._viewsPath || (app?.locals as any)?.bladeEngine?.config?.viewsPath;
+            
+            const viewData = {
+                ...data,
+                _nodeWireManager: nodeWireManager,
+                _viewsPath: viewsPath
+            };
+            
             // Si hay layout, preparar datos con secciones
             if (options?.layout) {
                 // Preparar secciones renderizadas
@@ -198,10 +193,9 @@ export abstract class BaseController {
                 for (const [sectionName, sectionContent] of Object.entries(sections)) {
                     if (typeof sectionContent === 'string') {
                         // Es una ruta de vista
-                        renderedSections[sectionName] = bladeEngine.render(sectionContent, data);
+                        renderedSections[sectionName] = bladeEngine.render(sectionContent, viewData);
                     } else if (sectionContent && typeof sectionContent === 'object' && 'render' in sectionContent) {
                         // Es un componente NodeWire
-                        const nodeWireManager = this.getNodeWireManager();
                         if (nodeWireManager) {
                             const templateEngine = nodeWireManager.getTemplateEngine();
                             renderedSections[sectionName] = sectionContent.render(templateEngine);
@@ -210,11 +204,11 @@ export abstract class BaseController {
                 }
 
                 // Renderizar la vista principal
-                const viewContent = bladeEngine.render(view, data);
+                const viewContent = bladeEngine.render(view, viewData);
 
                 // Renderizar el layout con secciones y contenido
                 const layoutData = {
-                    ...data,
+                    ...viewData,
                     _sections: renderedSections,
                     _content: viewContent
                 };
@@ -223,7 +217,7 @@ export abstract class BaseController {
                 this.res.send(html);
             } else {
                 // Renderizar sin layout
-                const html = bladeEngine.render(view, data);
+                const html = bladeEngine.render(view, viewData);
                 this.res.send(html);
             }
         } catch (error: any) {

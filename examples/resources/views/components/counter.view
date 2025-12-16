@@ -1,16 +1,13 @@
-{{!-- Helper para generar el estado automáticamente --}}
-{{{nodewireState component}}}
+@nodewireState(component)
 
 <div style="text-align: center; padding: 30px; background: #f8f9fa; border-radius: 10px;">
     <h2 style="color: #333; margin-bottom: 20px;">Contador NodeWire </h2>
     
-    {{!-- El sistema detecta automáticamente elementos que contienen valores del componente --}}
     <div style="font-size: 48px; font-weight: bold; color: #667eea; margin: 20px 0;">
-        {{component.count}}
+        {{ component.count }}
     </div>
 
     <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
-        {{!-- Los botones solo necesitan data-nw-click, el sistema encuentra el componente automáticamente --}}
         <button 
             data-nw-click="decrement"
             style="padding: 12px 24px; font-size: 18px; background: #dc3545; color: white; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s;"
@@ -39,4 +36,3 @@
         </button>
     </div>
 </div>
-

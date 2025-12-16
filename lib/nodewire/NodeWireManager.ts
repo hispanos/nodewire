@@ -1,7 +1,6 @@
 import { Component } from './Component';
 import path from 'node:path';
-import Handlebars from 'handlebars';
-import fs from 'node:fs';
+import { BladeEngine } from '../blade/BladeEngine';
 
 type ComponentConstructor = new (...args: any[]) => Component;
 
@@ -9,9 +8,17 @@ export class NodeWireManager {
     private components: Map<string, Component> = new Map();
     private componentRegistry: Map<string, ComponentConstructor> = new Map();
     private viewsPath: string;
+    private bladeEngine: BladeEngine | null = null;
 
     constructor(viewsPath?: string) {
         this.viewsPath = viewsPath || path.join(process.cwd(), 'resources/views');
+    }
+
+    /**
+     * Establece el BladeEngine para renderizar componentes
+     */
+    public setBladeEngine(bladeEngine: BladeEngine): void {
+        this.bladeEngine = bladeEngine;
     }
 
     /**
@@ -200,69 +207,28 @@ export class NodeWireManager {
     }
 
     /**
-     * Obtiene el motor de plantillas Handlebars configurado
+     * Obtiene el motor de plantillas Blade configurado
      */
     public getTemplateEngine(viewsPath?: string): any {
         const effectiveViewsPath = viewsPath || this.viewsPath;
         
-        // Registrar helpers de Handlebars
-        Handlebars.registerHelper('nodewireState', (comp: any) => {
-            return new Handlebars.SafeString(
-                `<script type="application/json" data-nodewire-state="${comp.id}" data-component-name="${comp.name}">${JSON.stringify(comp.getState())}</script>`
-            );
-        });
-        
-        Handlebars.registerHelper('nodewireId', (comp: any) => {
-            return comp.id;
-        });
-        
-        Handlebars.registerHelper('nodewireComponent', (comp: any) => {
-            return comp.name;
-        });
-        
-        Handlebars.registerHelper('wire', (prop: string, content: any, options: any) => {
-            // En Handlebars, los helpers reciben los argumentos de forma diferente
-            const data = options.data ? options.data.root : options;
-            let component = data.component || 
-                          data.counterComponent ||
-                          (data as any).component;
-            
-            if (!component) {
-                for (const key in data) {
-                    const value = (data as any)[key];
-                    if (value && typeof value === 'object' && 'id' in value && 'name' in value && 'getState' in value) {
-                        component = value;
-                        break;
-                    }
-                }
-            }
-            
-            if (!component) {
-                console.warn('[NodeWire] wire() llamado sin componente disponible');
-                return new Handlebars.SafeString(String(content || ''));
-            }
-            
-            const contentStr = String(content || '');
-            const html = `<span data-nodewire-id="${component.id}" data-nodewire-prop="${prop}">${contentStr}</span>`;
-            console.log(`[NodeWire] wire() generado para prop "${prop}":`, html);
-            return new Handlebars.SafeString(html);
-        });
+        // Si no hay BladeEngine configurado, crear uno temporal
+        let engine = this.bladeEngine;
+        if (!engine) {
+            engine = new BladeEngine({
+                viewsPath: effectiveViewsPath,
+                cacheEnabled: false
+            });
+        }
         
         return {
             render: (template: string, data: any): string => {
                 // Sanitizar el nombre del template para evitar path traversal
-                // Permitir barras pero eliminar .. y rutas absolutas
                 let safeTemplate = template.replace(/\.\./g, '').replace(/^\/+/, '');
-                // Normalizar separadores de ruta
                 safeTemplate = safeTemplate.replace(/\\/g, '/');
-                const templatePath = path.join(effectiveViewsPath, `${safeTemplate}.hbs`);
                 
-                // Leer el template
-                const templateContent = fs.readFileSync(templatePath, 'utf8');
-                
-                // Compilar y renderizar con Handlebars
-                const compiledTemplate = Handlebars.compile(templateContent);
-                let html = compiledTemplate(data);
+                // Renderizar con BladeEngine
+                let html = engine!.render(safeTemplate, data);
                 
                 // Post-procesar el HTML para marcar automáticamente elementos que contienen component.propiedad
                 const component = data.component;

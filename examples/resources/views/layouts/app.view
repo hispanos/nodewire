@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{title}} - Mi Aplicación</title>
+    <title>{{ title }} - Mi Aplicación</title>
     <style>
         * {
             margin: 0;
@@ -61,31 +61,27 @@
     </style>
 </head>
 <body>
-    {{!-- Usar @section con bloque - el contenedor solo se renderiza si la sección existe --}}
-    {{!-- El contenido de la sección se renderiza dentro del contenedor --}}
     <header class="header">
         <div class="header-content">
-            {{#@section "header"}}test{{/@section}}
+            @yield('header', '')
         </div>
     </header>
     
-    {{!-- Ejemplo de sidebar - el contenido se renderiza dentro del aside --}}
-    {{#if (lookup _sections "sidebar")}}
+    @if (_sections && _sections.sidebar)
     <aside class="sidebar" style="position: fixed; left: 0; top: 0; width: 250px; height: 100vh; background: rgba(255,255,255,0.9); padding: 20px;">
-        {{#@section "sidebar"}}{{/@section}}
+        @yield('sidebar', '')
     </aside>
-    {{/if}}
+    @endif
     
-    <main class="main-content" {{#if (lookup _sections "sidebar")}}style="margin-left: 250px;"{{/if}}>
+    <main class="main-content" @if (_sections && _sections.sidebar)style="margin-left: 250px;"@endif>
         <div class="content-wrapper">
-            {{{_content}}}
+            @content
         </div>
     </main>
     
-    {{!-- Footer - el contenido se renderiza dentro del footer --}}
     <footer class="footer">
         <div class="footer-content">
-            {{#@section "footer"}}{{/@section}}
+            @yield('footer', '')
         </div>
     </footer>
 

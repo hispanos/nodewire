@@ -93,30 +93,57 @@ export class BladeCompiler {
         const parts: Array<{ type: 'text' | 'expression', value: string }> = [];
         let currentIndex = 0;
         
-        // Buscar expresiones ${...}
-        const expressionRegex = /\$\{([^}]+)\}/g;
-        let match;
-
-        while ((match = expressionRegex.exec(content)) !== null) {
+        // Buscar expresiones ${...} manejando llaves anidadas
+        while (currentIndex < content.length) {
+            const startIndex = content.indexOf('${', currentIndex);
+            if (startIndex === -1) {
+                // No hay más expresiones, agregar el texto restante
+                const text = content.substring(currentIndex);
+                if (text) {
+                    parts.push({ type: 'text', value: text });
+                }
+                break;
+            }
+            
             // Agregar texto antes de la expresión
-            if (match.index > currentIndex) {
-                const text = content.substring(currentIndex, match.index);
+            if (startIndex > currentIndex) {
+                const text = content.substring(currentIndex, startIndex);
                 if (text) {
                     parts.push({ type: 'text', value: text });
                 }
             }
-
-            // Agregar la expresión
-            parts.push({ type: 'expression', value: match[1] });
-
-            currentIndex = match.index + match[0].length;
-        }
-
-        // Agregar texto restante
-        if (currentIndex < content.length) {
-            const text = content.substring(currentIndex);
-            if (text) {
-                parts.push({ type: 'text', value: text });
+            
+            // Buscar el cierre de la expresión manejando llaves anidadas
+            let depth = 0;
+            let exprStart = startIndex + 2; // Después de ${
+            let exprEnd = exprStart;
+            
+            for (let i = exprStart; i < content.length; i++) {
+                const char = content[i];
+                if (char === '{') {
+                    depth++;
+                } else if (char === '}') {
+                    if (depth === 0) {
+                        // Esta es la llave de cierre de la expresión
+                        exprEnd = i;
+                        break;
+                    }
+                    depth--;
+                }
+            }
+            
+            if (exprEnd > exprStart) {
+                // Agregar la expresión
+                const expression = content.substring(exprStart, exprEnd);
+                parts.push({ type: 'expression', value: expression });
+                currentIndex = exprEnd + 1;
+            } else {
+                // No se encontró el cierre, tratar como texto
+                const text = content.substring(startIndex);
+                if (text) {
+                    parts.push({ type: 'text', value: text });
+                }
+                break;
             }
         }
 

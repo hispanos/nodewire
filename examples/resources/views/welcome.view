@@ -1,9 +1,10 @@
-<h1>{{title}}</h1>
+<h1>{{ title }}</h1>
 <p style="text-align: center; color: #666; margin-bottom: 20px;">
     Framework MVC inspirado en Laravel con NodeWire (similar a Livewire)
 </p>
 
 <div class="component-demo">
-    {{@component "counterComponent"}}
+    @if (counterComponent)
+        @component('counterComponent')
+    @endif
 </div>
-

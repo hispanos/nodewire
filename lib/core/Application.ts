@@ -4,8 +4,6 @@ import { createServer, Server as HttpServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { NodeWireManager } from '../nodewire/NodeWireManager';
 import { Router } from './Router';
-import { create } from 'express-handlebars';
-import Handlebars from 'handlebars';
 import { BladeEngine } from '../blade/BladeEngine';
 
 export interface ApplicationConfig {
@@ -47,8 +45,10 @@ export class Application {
             cacheEnabled: false // Deshabilitar cache en desarrollo
         });
         
+        // Configurar NodeWireManager con BladeEngine
+        this.nodeWireManager.setBladeEngine(this.bladeEngine);
+        
         this.setupMiddleware();
-        this.setupViewEngine();
         this.setupNodeWire();
     }
 
@@ -63,11 +63,14 @@ export class Application {
         // Exponer NodeWireManager y BladeEngine en app.locals para que los controladores puedan acceder
         this.app.locals.nodeWireManager = this.nodeWireManager;
         this.app.locals.bladeEngine = this.bladeEngine;
+        
+        // Configurar NodeWireManager con BladeEngine si aún no está configurado
+        if (!(this.nodeWireManager as any).bladeEngine && this.bladeEngine) {
+            this.nodeWireManager.setBladeEngine(this.bladeEngine);
+        }
 
-        // Interceptar res.render para aplicar auto-marcado de NodeWire y soportar layouts
+        // Interceptar res.render para usar BladeEngine y aplicar auto-marcado de NodeWire
         this.app.use((req: Request, res: Response, next: NextFunction) => {
-            const originalRender = res.render.bind(res);
-            
             (res as any).render = (view: string, data: any = {}, callback?: (err: Error, html: string) => void) => {
                 // Verificar si hay un layout especificado
                 const layout = data?._layout;
@@ -84,13 +87,15 @@ export class Application {
                         _sectionBlocks: {} // Inicializar objeto para almacenar contenido de bloques
                     };
                     
-                    // Renderizar la vista primero
-                    originalRender(viewToRender, viewData, (err: Error, viewHtml: string) => {
-                        if (err) {
-                            console.error(`[Layout] Error renderizando vista ${viewToRender}:`, err);
-                            if (callback) callback(err, '');
-                            return;
-                        }
+                    // Renderizar la vista primero con BladeEngine
+                    if (!this.bladeEngine) {
+                        const err = new Error('BladeEngine no está disponible');
+                        if (callback) callback(err, '');
+                        return;
+                    }
+                    
+                    try {
+                        const viewHtml = this.bladeEngine.render(viewToRender, viewData);
                         
                         // Debug: verificar que la vista se haya renderizado
                         console.log(`[Layout] Vista ${viewToRender} renderizada:`, {
@@ -103,43 +108,6 @@ export class Application {
                         // Inicializar objeto para almacenar contenido de bloques si no existe
                         if (!viewData._sectionBlocks) {
                             viewData._sectionBlocks = {};
-                        }
-                        
-                        // Pre-renderizar el layout síncronamente para capturar los bloques de las secciones
-                        // Esto permite que el contenido dentro de {{#@section}}...{{/@section}} esté disponible como {{_content}}
-                        try {
-                            const templateEngine = this.nodeWireManager.getTemplateEngine(this.config.viewsPath);
-                            // IMPORTANTE: Crear un objeto que mantenga la referencia a _sectionBlocks
-                            // No usar spread porque podría copiar la referencia incorrecta
-                            const layoutDataForBlocks: any = {
-                                ...data,
-                                _content: typeof viewHtml === 'string' ? viewHtml : String(viewHtml || ''),
-                                _sections: {},
-                                _nodeWireManager: this.nodeWireManager,
-                                _viewsPath: this.config.viewsPath
-                            };
-                            // CRÍTICO: Asignar la referencia después del spread para asegurar que sea la correcta
-                            layoutDataForBlocks._sectionBlocks = viewData._sectionBlocks;
-                            
-                            console.log('[Layout] Pre-renderizando layout para capturar bloques, _sectionBlocks:', {
-                                isSameReference: layoutDataForBlocks._sectionBlocks === viewData._sectionBlocks,
-                                viewDataBlocks: Object.keys(viewData._sectionBlocks || {}),
-                                layoutDataBlocks: Object.keys(layoutDataForBlocks._sectionBlocks || {})
-                            });
-                            
-                            // Pre-renderizar el layout solo para capturar los bloques
-                            templateEngine.render(`layouts/${layout.name}`, layoutDataForBlocks);
-                            // Los bloques ahora están en viewData._sectionBlocks (misma referencia)
-                            
-                            // Debug: verificar qué bloques se capturaron
-                            console.log('[Layout] Bloques capturados:', Object.keys(viewData._sectionBlocks || {}).map(k => ({
-                                name: k,
-                                hasContent: !!viewData._sectionBlocks[k],
-                                length: typeof viewData._sectionBlocks[k] === 'string' ? viewData._sectionBlocks[k].length : 'N/A',
-                                preview: typeof viewData._sectionBlocks[k] === 'string' ? viewData._sectionBlocks[k].substring(0, 50) : String(viewData._sectionBlocks[k])
-                            })));
-                        } catch (preRenderErr) {
-                            console.warn(`[Layout] Error en pre-renderizado para capturar bloques:`, preRenderErr);
                         }
                         
                         // Renderizar todas las secciones del layout
@@ -280,12 +248,15 @@ export class Application {
                             sectionsKeys: Object.keys(layoutData._sections || {})
                         });
                         
-                        // Renderizar el layout
-                        originalRender(`layouts/${layout.name}`, layoutData, (err: Error, layoutHtml: string) => {
-                            if (err) {
-                                if (callback) callback(err, '');
-                                return;
-                            }
+                        // Renderizar el layout con BladeEngine
+                        if (!this.bladeEngine) {
+                            const err = new Error('BladeEngine no está disponible');
+                            if (callback) callback(err, '');
+                            return;
+                        }
+                        
+                        try {
+                            let layoutHtml = this.bladeEngine.render(`layouts/${layout.name}`, layoutData);
                             
                             // Reemplazar los marcadores de secciones con el contenido renderizado
                             let processedLayoutHtml = layoutHtml;
@@ -320,29 +291,38 @@ export class Application {
                                     processedHtml = this.nodeWireManager.autoMarkComponentProperties(processedHtml, component);
                                 }
                                 
-                                if (callback) {
-                                    callback(err, processedHtml);
-                                } else {
-                                    res.send(processedHtml);
-                                }
+                            if (callback) {
+                                callback(null as any, processedHtml);
                             } else {
-                                if (callback) callback(err, '');
+                                res.send(processedHtml);
                             }
-                        });
-                    });
-                } else {
-                    // Renderizar normalmente sin layout
-                    // Agregar referencias necesarias para helpers
-                    const viewData = {
-                        ...data,
-                        _nodeWireManager: this.nodeWireManager,
-                        _viewsPath: this.config.viewsPath
-                    };
-                    originalRender(view, viewData, (err: Error, html: string) => {
-                        if (err) {
-                            if (callback) callback(err, '');
-                            return;
+                        } else {
+                            if (callback) callback(null as any, '');
                         }
+                    } catch (layoutErr: any) {
+                        console.error(`[Layout] Error renderizando layout ${layout.name}:`, layoutErr);
+                        if (callback) callback(layoutErr, '');
+                    }
+                } catch (viewErr: any) {
+                    console.error(`[Layout] Error renderizando vista ${viewToRender}:`, viewErr);
+                    if (callback) callback(viewErr, '');
+                }
+                } else {
+                    // Renderizar normalmente sin layout usando BladeEngine
+                    if (!this.bladeEngine) {
+                        const err = new Error('BladeEngine no está disponible');
+                        if (callback) callback(err, '');
+                        return;
+                    }
+                    
+                    try {
+                        const viewData = {
+                            ...data,
+                            _nodeWireManager: this.nodeWireManager,
+                            _viewsPath: this.config.viewsPath
+                        };
+                        
+                        let html = this.bladeEngine.render(view, viewData);
                         
                         if (html) {
                             // Post-procesar el HTML para aplicar auto-marcado de NodeWire
@@ -365,14 +345,17 @@ export class Application {
                             }
                             
                             if (callback) {
-                                callback(err, processedHtml);
+                                callback(null as any, processedHtml);
                             } else {
                                 res.send(processedHtml);
                             }
                         } else {
-                            if (callback) callback(err, '');
+                            if (callback) callback(null as any, '');
                         }
-                    });
+                    } catch (viewErr: any) {
+                        console.error(`[Blade] Error renderizando vista ${view}:`, viewErr);
+                        if (callback) callback(viewErr, '');
+                    }
                 }
             };
             
@@ -380,287 +363,6 @@ export class Application {
         });
     }
 
-    private setupViewEngine(): void {
-        // Configurar Handlebars
-        const hbs = create({
-            extname: '.hbs',
-            defaultLayout: false as any,
-            partialsDir: this.config.viewsPath!,
-            helpers: {
-                // Helper para generar el estado de NodeWire
-                nodewireState: (comp: any) => {
-                    return new Handlebars.SafeString(
-                        `<script type="application/json" data-nodewire-state="${comp.id}" data-component-name="${comp.name}">${JSON.stringify(comp.getState())}</script>`
-                    );
-                },
-                // Helper para obtener el ID del componente
-                nodewireId: (comp: any) => {
-                    return comp.id;
-                },
-                // Helper para obtener el nombre del componente
-                nodewireComponent: (comp: any) => {
-                    return comp.name;
-                },
-                // Helper para marcar automáticamente elementos con propiedades del componente
-                // Uso: {{wire 'count' component.count}}
-                wire: (prop: string, content: any, options: any) => {
-                    // En Handlebars, los helpers reciben los argumentos de forma diferente
-                    // options.data.root contiene el contexto completo
-                    const data = options.data ? options.data.root : options;
-                    let component = data.component || 
-                                  data.counterComponent ||
-                                  (data as any).component;
-                    
-                    // Si aún no lo encontramos, buscar cualquier propiedad que tenga 'id' y 'name'
-                    if (!component) {
-                        for (const key in data) {
-                            const value = (data as any)[key];
-                            if (value && typeof value === 'object' && 'id' in value && 'name' in value && 'getState' in value) {
-                                component = value;
-                                console.log(`[NodeWire] Componente encontrado en data.${key}`);
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (!component) {
-                        console.warn('[NodeWire] wire() llamado sin componente disponible. Data keys:', Object.keys(data));
-                        return new Handlebars.SafeString(String(content || ''));
-                    }
-                    
-                    const contentStr = String(content || '');
-                    const html = `<span data-nodewire-id="${component.id}" data-nodewire-prop="${prop}">${contentStr}</span>`;
-                    console.log(`[NodeWire] wire() generado (render inicial):`, html.substring(0, 100));
-                    return new Handlebars.SafeString(html);
-                },
-                // Helper para renderizar cualquier sección del layout
-                // Uso simple: {{@section 'nombreSeccion'}} - devuelve la sección o cadena vacía
-                // Uso con bloque: {{#@section "nombre"}}<div>...</div>{{/@section}}
-                //   - El bloque solo se renderiza si la sección existe
-                //   - El contenido de la sección se inserta automáticamente dentro del bloque
-                //   - No es necesario usar {{{content}}}, el contenido se inserta directamente
-                '@section': function(sectionName: any, options?: any) {
-                    try {
-                        // Manejar caso donde no hay options
-                        if (!options || typeof options !== 'object') {
-                            console.warn(`[Layout] @section llamado sin options válidas para "${sectionName}"`);
-                            return '';
-                        }
-                        
-                        // Obtener el contexto de datos
-                        // En Handlebars, options.data.root contiene el contexto completo
-                        const data = (options.data && options.data.root) ? options.data.root : {};
-                        const sections = data._sections || {};
-                        const sectionContent = sections[sectionName];
-                        
-                        // Debug: verificar qué se está recibiendo
-                        console.log(`[Layout] Helper @section para "${sectionName}":`, {
-                            hasSection: !!sectionContent,
-                            type: typeof sectionContent,
-                            isString: typeof sectionContent === 'string',
-                            preview: typeof sectionContent === 'string' ? sectionContent.substring(0, 100) : String(sectionContent)
-                        });
-                        
-                        // Si es un helper de bloque (tiene options.fn)
-                        if (options && typeof options.fn === 'function') {
-                            // Capturar el contenido del bloque (lo que está dentro de {{#@section}}...{{/@section}})
-                            // Este contenido estará disponible como {{_content}} dentro de la vista de la sección
-                            const blockContent = options.fn(data);
-                            
-                            // Debug: verificar qué contenido se capturó
-                            console.log(`[Layout] Helper @section capturando bloque para "${sectionName}":`, {
-                                blockContentLength: typeof blockContent === 'string' ? blockContent.length : 'N/A',
-                                blockContentPreview: typeof blockContent === 'string' ? blockContent.substring(0, 100) : String(blockContent),
-                                hasSectionBlocks: !!data._sectionBlocks
-                            });
-                            
-                            // Almacenar el contenido del bloque para que esté disponible cuando se renderice la sección
-                            if (!data._sectionBlocks) {
-                                data._sectionBlocks = {};
-                                console.warn(`[Layout] Helper @section: _sectionBlocks no existe, creando nuevo objeto para "${sectionName}"`);
-                            }
-                            data._sectionBlocks[sectionName] = blockContent;
-                            
-                            // Debug: verificar que se almacenó correctamente
-                            console.log(`[Layout] Bloque almacenado para "${sectionName}":`, {
-                                stored: !!data._sectionBlocks[sectionName],
-                                storedLength: typeof data._sectionBlocks[sectionName] === 'string' ? data._sectionBlocks[sectionName].length : 'N/A',
-                                storedPreview: typeof data._sectionBlocks[sectionName] === 'string' ? data._sectionBlocks[sectionName].substring(0, 50) : String(data._sectionBlocks[sectionName]),
-                                allBlocks: Object.keys(data._sectionBlocks),
-                                isSameObject: data._sectionBlocks === (options.data && options.data.root && (options.data.root as any)._sectionBlocks)
-                            });
-                            
-                            // Si hay contenido en la sección, renderizarlo (la vista de la sección puede usar {{_content}} para acceder al bloque)
-                            if (sectionContent) {
-                                // Asegurar que sectionContent sea un string
-                                if (typeof sectionContent !== 'string') {
-                                    console.error(`[Layout] Helper @section: sección "${sectionName}" no es un string, es ${typeof sectionContent}:`, sectionContent);
-                                    // Si la sección no es válida, usar el contenido del bloque como fallback
-                                    return new Handlebars.SafeString(blockContent);
-                                }
-                                
-                                // Verificar que no sea "[object Object]"
-                                if (sectionContent === '[object Object]' || sectionContent.startsWith('[object ')) {
-                                    console.error(`[Layout] Helper @section: sección "${sectionName}" contiene objeto convertido a string`);
-                                    // Si la sección no es válida, usar el contenido del bloque como fallback
-                                    return new Handlebars.SafeString(blockContent);
-                                }
-                                
-                                // El contenido de la sección se renderizará en renderSection, donde se pasará _content
-                                // Por ahora, devolver un marcador temporal que será reemplazado cuando se renderice la sección
-                                return new Handlebars.SafeString(`<!--@SECTION:${sectionName}@-->`);
-                            } else {
-                                // Si no hay contenido en la sección, renderizar el contenido del bloque (contenido por defecto)
-                                return new Handlebars.SafeString(blockContent);
-                            }
-                        } else {
-                            // Helper simple: devolver el contenido de la sección o cadena vacía
-                            if (typeof sectionContent !== 'string') {
-                                console.error(`[Layout] Helper @section (simple): sección "${sectionName}" no es un string`);
-                                return '';
-                            }
-                            return new Handlebars.SafeString(sectionContent);
-                        }
-                    } catch (error: any) {
-                        console.error(`[Layout] Error en helper @section para sección "${sectionName}":`, error);
-                        if (error.stack) {
-                            console.error('[Layout] Stack:', error.stack);
-                        }
-                        return '';
-                    }
-                } as any,
-                // Helper para verificar si una sección existe (para uso en condicionales)
-                // Uso: {{#if @hasSection 'nombreSeccion'}}...{{/if}}
-                '@hasSection': function(sectionName: string, options: any) {
-                    try {
-                        const data = (options && options.data && options.data.root) ? options.data.root : {};
-                        const sections = data._sections || {};
-                        return !!sections[sectionName];
-                    } catch (error: any) {
-                        console.error(`[Layout] Error en helper @hasSection para sección "${sectionName}":`, error);
-                        return false;
-                    }
-                } as any,
-                // Helper para renderizar un componente NodeWire automáticamente
-                // Uso: {{@component "counterComponent"}}
-                // Busca el componente en el contexto de datos y lo renderiza automáticamente
-                // No requiere pasar argumentos porque el componente ya tiene sus argumentos definidos en el TS
-                '@component': function(componentName: string, options: any) {
-                    try {
-                        // Obtener el contexto de datos
-                        const data = (options && options.data && options.data.root) ? options.data.root : {};
-                        
-                        // Debug: verificar qué datos están disponibles
-                        console.log(`[Component] Buscando componente "${componentName}" en contexto:`, {
-                            availableKeys: Object.keys(data),
-                            hasComponent: !!data[componentName],
-                            componentType: data[componentName] ? typeof data[componentName] : 'undefined'
-                        });
-                        
-                        // Buscar el componente en el contexto de datos
-                        const component = data[componentName];
-                        
-                        if (!component) {
-                            console.warn(`[Component] Componente "${componentName}" no encontrado en el contexto de datos. Claves disponibles:`, Object.keys(data));
-                            return '';
-                        }
-                        
-                        // Verificar que sea un componente válido (tiene método render)
-                        if (typeof component !== 'object' || !component.render || typeof component.render !== 'function') {
-                            console.error(`[Component] "${componentName}" no es un componente válido (no tiene método render)`);
-                            return '';
-                        }
-                        
-                        // Obtener el NodeWireManager y el template engine
-                        // Necesitamos acceso a la instancia de Application para obtener nodeWireManager
-                        // Usamos una referencia almacenada en el contexto de la aplicación
-                        const nodeWireManager = (options.data && options.data.root && (options.data.root as any)._nodeWireManager) 
-                            || (data as any)._nodeWireManager;
-                        
-                        if (!nodeWireManager) {
-                            console.error(`[Component] NodeWireManager no disponible para renderizar componente "${componentName}"`);
-                            return '';
-                        }
-                        
-                        // Obtener el template engine
-                        const viewsPath = (options.data && options.data.root && (options.data.root as any)._viewsPath) 
-                            || (data as any)._viewsPath;
-                        const templateEngine = nodeWireManager.getTemplateEngine(viewsPath);
-                        
-                        // Renderizar el componente
-                        const html = component.render(templateEngine);
-                        
-                        // Asegurar que sea un string
-                        const htmlStr = typeof html === 'string' ? html : String(html || '');
-                        
-                        return new Handlebars.SafeString(htmlStr);
-                    } catch (error: any) {
-                        console.error(`[Component] Error al renderizar componente "${componentName}":`, error);
-                        if (error.stack) {
-                            console.error('[Component] Stack:', error.stack);
-                        }
-                        return '';
-                    }
-                } as any,
-                // Helper para renderizar el contenido principal en un layout
-                // Uso: {{@content}}
-                '@content': function(options: any) {
-                    try {
-                        const data = (options && options.data && options.data.root) ? options.data.root : (options || {});
-                        const content = data._content || '';
-                        
-                        // Debug: verificar qué se está recibiendo
-                        console.log(`[Layout] Helper @content llamado:`, {
-                            hasContent: !!content,
-                            type: typeof content,
-                            length: typeof content === 'string' ? content.length : 'N/A',
-                            preview: typeof content === 'string' ? content.substring(0, 100) : String(content),
-                            dataKeys: Object.keys(data)
-                        });
-                        
-                        // Asegurar que sea un string
-                        const contentStr = typeof content === 'string' ? content : String(content || '');
-                        return new Handlebars.SafeString(contentStr);
-                    } catch (error: any) {
-                        console.error(`[Layout] Error en helper @content:`, error);
-                        return new Handlebars.SafeString('');
-                    }
-                } as any
-            }
-        });
-        
-        this.app.engine('.hbs', hbs.engine);
-        this.app.set('view engine', '.hbs');
-        this.app.set('views', this.config.viewsPath!);
-        
-        // Registrar helpers directamente en Handlebars para asegurar que funcionen
-        // Esto es necesario porque express-handlebars puede tener problemas con algunos helpers
-        const contentHelper = function(options: any) {
-            try {
-                const data = (options && options.data && options.data.root) ? options.data.root : (options || {});
-                const content = data._content || '';
-                
-                // Debug: verificar qué se está recibiendo
-                console.log(`[Layout] Helper @content (Handlebars directo) llamado:`, {
-                    hasContent: !!content,
-                    type: typeof content,
-                    length: typeof content === 'string' ? content.length : 'N/A',
-                    preview: typeof content === 'string' ? content.substring(0, 100) : String(content),
-                    dataKeys: Object.keys(data)
-                });
-                
-                // Asegurar que sea un string
-                const contentStr = typeof content === 'string' ? content : String(content || '');
-                return new Handlebars.SafeString(contentStr);
-            } catch (error: any) {
-                console.error(`[Layout] Error en helper @content (Handlebars directo):`, error);
-                return new Handlebars.SafeString('');
-            }
-        };
-        
-        // Registrar el helper directamente en Handlebars
-        Handlebars.registerHelper('@content', contentHelper as any);
-    }
 
     private setupNodeWire(): void {
         // Endpoint HTTP para compatibilidad (fallback)
