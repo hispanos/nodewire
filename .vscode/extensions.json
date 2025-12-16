@@ -1,0 +1,6 @@
+{
+  "recommendations": [
+    "shufo.vscode-blade-formatter",
+    "onecentlin.laravel-blade"
+  ]
+}

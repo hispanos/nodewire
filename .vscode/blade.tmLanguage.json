@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Blade",
+  "patterns": [
+    {
+      "include": "#directives"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "text.html.basic"
+    }
+  ],
+  "repository": {
+    "directives": {
+      "patterns": [
+        {
+          "name": "keyword.control.blade",
+          "match": "@(if|elseif|else|endif|foreach|endforeach|for|endfor|while|endwhile|switch|case|default|break|continue|return)\\b"
+        },
+        {
+          "name": "entity.name.function.blade",
+          "match": "@(yield|component|section|extends|include|slot|content|nodewireState)\\s*\\("
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.blade",
+          "begin": "\\{\\{",
+          "end": "\\}\\}",
+          "patterns": [
+            {
+              "name": "variable.other.blade",
+              "match": "\\b[a-zA-Z_][a-zA-Z0-9_.]*\\b"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.blade.raw",
+          "begin": "\\{\\!\\!",
+          "end": "\\!\\!\\}"
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.blade",
+          "begin": "\\{\\{--",
+          "end": "--\\}\\}"
+        }
+      ]
+    }
+  },
+  "scopeName": "text.html.blade"
+}
