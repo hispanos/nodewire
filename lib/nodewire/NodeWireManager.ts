@@ -7,6 +7,7 @@ type ComponentConstructor = new (...args: any[]) => Component;
 export class NodeWireManager {
     private components: Map<string, Component> = new Map();
     private componentRegistry: Map<string, ComponentConstructor> = new Map();
+    private componentInitialParams: Map<string, { name: string; args: any[]; options?: Record<string, any> }> = new Map();
     private viewsPath: string;
     private bladeEngine: BladeEngine | null = null;
 
@@ -53,7 +54,14 @@ export class NodeWireManager {
         }
 
         const component = new ComponentClass(...args);
-        this.components.set(component.id, component);
+        const componentId = component.id;
+        this.components.set(componentId, component);
+        
+        // Guardar los parámetros de inicialización para poder recrear el componente
+        this.componentInitialParams.set(componentId, {
+            name: name,
+            args: args
+        });
         
         return component;
     }
@@ -79,14 +87,38 @@ export class NodeWireManager {
             for (const [key, value] of Object.entries(options)) {
                 const normalizedKey = key.toLowerCase().replace(/[_-]/g, '');
                 if (normalizedKey === normalizedParam) {
+                    console.log(`[NodeWire] Mapeando ${key} -> ${paramName} = ${value}`);
                     return value;
                 }
             }
+            // Si no se encuentra, retornar undefined (el constructor usará el valor por defecto)
+            console.log(`[NodeWire] No se encontró opción para parámetro ${paramName}, usando undefined (valor por defecto)`);
             return undefined;
         });
+        
+        // Debug: verificar que los parámetros se mapearon correctamente
+        console.log(`[NodeWire] ===== Creando componente ${name} =====`);
+        console.log(`[NodeWire] Opciones recibidas:`, JSON.stringify(options));
+        console.log(`[NodeWire] Parámetros del constructor detectados:`, constructorParams);
+        console.log(`[NodeWire] Argumentos finales que se pasarán al constructor:`, args);
+        console.log(`[NodeWire] ==========================================`);
 
         const component = new ComponentClass(...args);
-        this.components.set(component.id, component);
+        const componentId = component.id;
+        this.components.set(componentId, component);
+        
+        // Verificar el estado del componente después de crearlo
+        console.log(`[NodeWire] Componente creado con ID: ${componentId}`);
+        if ('count' in component) {
+            console.log(`[NodeWire] Estado del componente (count): ${(component as any).count}`);
+        }
+        
+        // Guardar los parámetros de inicialización para poder recrear el componente
+        this.componentInitialParams.set(componentId, {
+            name: name,
+            args: args,
+            options: options
+        });
         
         return component;
     }
@@ -102,7 +134,12 @@ export class NodeWireManager {
             if (match && match[1]) {
                 return match[1]
                     .split(',')
-                    .map(param => param.trim().split(':')[0].trim())
+                    .map(param => {
+                        // Remover valores por defecto (ej: "initialValue = 0" -> "initialValue")
+                        const cleaned = param.trim().split('=')[0].trim();
+                        // Remover tipos TypeScript (ej: "initialValue: number" -> "initialValue")
+                        return cleaned.split(':')[0].trim();
+                    })
                     .filter(param => param.length > 0);
             }
         } catch (e) {
@@ -135,16 +172,59 @@ export class NodeWireManager {
             let component = this.components.get(id);
             
             if (!component) {
-                // Si no existe, intentar recrearlo desde el registro
-                const ComponentClass = this.componentRegistry.get(componentName);
-                if (!ComponentClass) {
-                    throw new Error(`Componente ${componentName} no encontrado`);
+                // Si no existe, intentar recrearlo desde el registro con los parámetros guardados
+                const initialParams = this.componentInitialParams.get(id);
+                
+                if (initialParams) {
+                    // Recrear con los parámetros originales
+                    const ComponentClass = this.componentRegistry.get(initialParams.name);
+                    if (!ComponentClass) {
+                        throw new Error(`Componente ${initialParams.name} no encontrado`);
+                    }
+                    
+                    // Guardar el ID original que necesitamos restaurar
+                    const originalId = id;
+                    
+                    // Si tiene opciones guardadas, recrear manualmente para controlar el ID
+                    if (initialParams.options) {
+                        const constructorParams = this.getConstructorParams(ComponentClass);
+                        const args = constructorParams.map((paramName: string) => {
+                            const normalizedParam = paramName.toLowerCase().replace(/[_-]/g, '');
+                            for (const [key, value] of Object.entries(initialParams.options!)) {
+                                const normalizedKey = key.toLowerCase().replace(/[_-]/g, '');
+                                if (normalizedKey === normalizedParam) {
+                                    return value;
+                                }
+                            }
+                            return undefined;
+                        });
+                        component = new ComponentClass(...args);
+                    } else {
+                        // Usar los argumentos guardados
+                        component = new ComponentClass(...initialParams.args);
+                    }
+                    
+                    // Restaurar el ID original (importante para mantener la referencia del cliente)
+                    const newId = component.id;
+                    component.id = originalId;
+                    
+                    // Actualizar el Map: remover el nuevo ID y usar el original
+                    this.components.delete(newId);
+                    this.components.set(originalId, component);
+                    
+                    // Actualizar también los parámetros iniciales con el ID correcto
+                    this.componentInitialParams.delete(newId);
+                    this.componentInitialParams.set(originalId, initialParams);
+                } else {
+                    // Fallback: crear con valores por defecto si no hay parámetros guardados
+                    const ComponentClass = this.componentRegistry.get(componentName);
+                    if (!ComponentClass) {
+                        throw new Error(`Componente ${componentName} no encontrado`);
+                    }
+                    component = new ComponentClass();
+                    component.id = id;
+                    this.components.set(id, component);
                 }
-                // Crear nueva instancia con valores por defecto y luego restaurar el ID
-                // Nota: Los componentes deben aceptar el ID como último parámetro opcional
-                component = new ComponentClass();
-                component.id = id; // Restaurar el ID original
-                this.components.set(id, component);
             }
 
             // Guardar el estado anterior para detectar cambios

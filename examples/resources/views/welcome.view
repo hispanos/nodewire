@@ -8,3 +8,28 @@
         @component('counterComponent')
     @endif
 </div>
+
+<!-- Ejemplo: Usar múltiples componentes en la misma vista -->
+<div class="multiple-components-demo" style="margin-top: 30px;">
+    <h2>Múltiples Componentes</h2>
+    
+    <!-- Usar componente por nombre de string -->
+    @if (counterComponent1)
+        <div style="margin-bottom: 20px;">
+            <h3>Contador (por nombre):</h3>
+            @component('counterComponent1')
+        </div>
+    @endif
+
+    @foreach (users as user)
+        @component(counterComponent1, { initialValue: user.id })
+    @endforeach
+    
+    <!-- Usar componente directamente por variable -->
+    @if (counterComponent2)
+        <div style="margin-bottom: 20px;">
+            <h3>Contador (por variable):</h3>
+            @component(counterComponent2)
+        </div>
+    @endif
+</div>

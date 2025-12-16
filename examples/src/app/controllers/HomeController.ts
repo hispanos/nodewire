@@ -10,32 +10,22 @@ export class HomeController extends BaseController {
     };
 
     public async index() {
-        // Acceder directamente a los componentes con argumentos nombrados
-        const counterComponent = this.components.CounterComponent({ initialValue: 0 });
-        
-        // Usar el sistema de secciones dinámicas
-        // Puedes pasar cualquier sección personalizada
-        // this.render('welcome', {
-        //     title: 'Framework MVC con NodeWire',
-        //     counterComponent: counterComponent
-        // }, {
-        //     layout: 'app',
-        //     sections: {
-        //         header: 'partials/header',  // Vista partial para el header
-        //         footer: 'partials/footer', // Vista partial para el footer
-        //         // sidebar: sidebarComponent,  // Ejemplo: puedes agregar cualquier sección
-        //         // topBar: 'partials/topbar',  // Ejemplo: otra sección personalizada
-        //     }
-        // });
-        
-        // Ejemplo: Usar componentes NodeWire en las secciones
+        // Crear múltiples componentes para usar en la vista
+        const counterComponent1 = this.components.CounterComponent({ initialValue: 0 });
+        const counterComponent2 = this.components.CounterComponent({ initialValue: 10 });
         const headerComponent = this.components.HeaderComponent({ 
             siteName: 'Mi Aplicación',
             currentUser: 'Usuario123'
         });
+        
+        // Ahora puedes pasar múltiples componentes a la vista
+        // Todos estarán disponibles en el contexto de la vista
         this.render('welcome', {
             title: 'Framework MVC con NodeWire',
-            counterComponent: counterComponent
+            users: [{name: 'Usuario1', email: 'usuario1@example.com', id: 1}, {name: 'Usuario2', email: 'usuario2@example.com', id: 2}, {name: 'Usuario3', email: 'usuario3@example.com', id: 3}],
+            counterComponent1: counterComponent1,  // Primer componente
+            counterComponent2: counterComponent2,  // Segundo componente
+            // Puedes agregar más componentes aquí
         }, {
             layout: 'app',
             sections: {

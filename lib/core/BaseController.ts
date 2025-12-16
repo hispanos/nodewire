@@ -214,11 +214,51 @@ export abstract class BaseController {
                 };
 
                 const html = bladeEngine.render(`layouts/${options.layout}`, layoutData);
-                this.res.send(html);
+                
+                // Post-procesar el HTML para aplicar auto-marcado de NodeWire a TODOS los componentes
+                let processedHtml = html;
+                const components: any[] = [];
+                
+                // Buscar todos los componentes en viewData
+                for (const key in viewData) {
+                    const value = (viewData as any)[key];
+                    if (value && typeof value === 'object' && 'id' in value && 'name' in value && 'getState' in value) {
+                        components.push(value);
+                    }
+                }
+                
+                // Procesar cada componente encontrado
+                if (nodeWireManager) {
+                    for (const component of components) {
+                        processedHtml = nodeWireManager.autoMarkComponentProperties(processedHtml, component);
+                    }
+                }
+                
+                this.res.send(processedHtml);
             } else {
                 // Renderizar sin layout
-                const html = bladeEngine.render(view, viewData);
-                this.res.send(html);
+                let html = bladeEngine.render(view, viewData);
+                
+                // Post-procesar el HTML para aplicar auto-marcado de NodeWire a TODOS los componentes
+                let processedHtml = html;
+                const components: any[] = [];
+                
+                // Buscar todos los componentes en viewData
+                for (const key in viewData) {
+                    const value = (viewData as any)[key];
+                    if (value && typeof value === 'object' && 'id' in value && 'name' in value && 'getState' in value) {
+                        components.push(value);
+                    }
+                }
+                
+                // Procesar cada componente encontrado
+                if (nodeWireManager) {
+                    for (const component of components) {
+                        processedHtml = nodeWireManager.autoMarkComponentProperties(processedHtml, component);
+                    }
+                }
+                
+                this.res.send(processedHtml);
             }
         } catch (error: any) {
             console.error(`[Blade] Error renderizando vista ${view}:`, error);

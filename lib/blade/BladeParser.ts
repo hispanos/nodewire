@@ -215,28 +215,70 @@ export class BladeParser {
 
     private processLoops(content: string): string {
         // @foreach - convertir a expresión JavaScript
-        // Necesitamos un enfoque más complejo para manejar loops dentro de template literals
-        // Por ahora, usaremos marcadores que el compilador procesará
-        content = content.replace(/@foreach\s*\(\s*([^)]+)\s*\)/g, (match, loopExpr) => {
-            // Parsear $items as $item o $items as $key => $value
-            const loopMatch = loopExpr.match(/\$(\w+)\s+as\s+\$(\w+)(?:\s*=>\s*\$(\w+))?/);
+        // Soporta: @foreach(items as item) y @foreach(items as key => value)
+        // También soporta variables con o sin prefijo $
+        const foreachRegex = /@foreach\s*\(\s*([^)]+)\s*\)/g;
+        let lastIndex = 0;
+        let result = '';
+        let match;
+        const loopVariables = new Set<string>(); // Rastrear variables de loop para no convertirlas
+        
+        // Primero, encontrar todas las variables de loop
+        const tempContent = content;
+        const tempMatches = [...tempContent.matchAll(/@foreach\s*\(\s*([^)]+)\s*\)/g)];
+        for (const tempMatch of tempMatches) {
+            const loopExpr = tempMatch[1].trim();
+            const loopMatch = loopExpr.match(/(\$?\w+)\s+as\s+(\$?\w+)(?:\s*=>\s*(\$?\w+))?/);
             if (loopMatch) {
-                const itemsVar = loopMatch[1];
-                const valueVar = loopMatch[2];
-                const keyVar = loopMatch[3];
-                if (keyVar) {
-                    return `<!--LOOP:${itemsVar}:${keyVar}:${valueVar}-->`;
-                } else {
-                    return `<!--LOOP:${itemsVar}::${valueVar}-->`;
+                loopVariables.add(loopMatch[2].replace(/^\$/, ''));
+                if (loopMatch[3]) {
+                    loopVariables.add(loopMatch[3].replace(/^\$/, ''));
                 }
             }
-            return match;
-        });
-
-        // @endforeach
-        content = content.replace(/@endforeach/g, '<!--ENDLOOP-->');
-
-        return content;
+        }
+        
+        // Ahora procesar los loops
+        while ((match = foreachRegex.exec(content)) !== null) {
+            // Agregar texto antes del match
+            result += content.substring(lastIndex, match.index);
+            
+            const loopExpr = match[1].trim();
+            
+            // Parsear: items as item o items as key => value
+            // Soporta con o sin prefijo $
+            const loopMatch = loopExpr.match(/(\$?\w+)\s+as\s+(\$?\w+)(?:\s*=>\s*(\$?\w+))?/);
+            
+            if (loopMatch) {
+                const itemsVar = loopMatch[1].replace(/^\$/, ''); // Remover $ si existe
+                const valueVar = loopMatch[2].replace(/^\$/, ''); // Remover $ si existe
+                const keyVar = loopMatch[3] ? loopMatch[3].replace(/^\$/, '') : null;
+                
+                // Convertir a JavaScript: for (const [key, value] of Object.entries(data.items)) { ... }
+                if (keyVar) {
+                    // Con clave y valor: @foreach(items as key => value)
+                    result += `\${(function(){let html='';const items=data.${itemsVar};if(items&&Array.isArray(items)){items.forEach((${valueVar},${keyVar})=>{html+=\``;
+                } else {
+                    // Solo valor: @foreach(items as item)
+                    result += `\${(function(){let html='';const items=data.${itemsVar};if(items&&Array.isArray(items)){items.forEach((${valueVar})=>{html+=\``;
+                }
+            } else {
+                // Si no coincide el patrón, dejar como está
+                result += match[0];
+            }
+            
+            lastIndex = match.index + match[0].length;
+        }
+        
+        // Agregar el texto restante
+        result += content.substring(lastIndex);
+        
+        // Procesar @endforeach - cerrar el loop
+        result = result.replace(/@endforeach/g, `\`;});}return html;})()}`);
+        
+        // Guardar las variables de loop para que convertBladeExpression las respete
+        (this as any)._loopVariables = loopVariables;
+        
+        return result;
     }
 
     private processIncludes(content: string, viewsPath: string): string {
@@ -281,13 +323,94 @@ export class BladeParser {
         content = content.replace(/@nodewireState\s*\(\s*([^)]+)\s*\)/g, (match, componentExpr) => {
             const jsExpr = this.convertBladeExpression(componentExpr.trim());
             // Generar código en una sola línea para evitar problemas con múltiples líneas
-            return `\${(function(){const c=${jsExpr};const s=JSON.stringify(c.getState());return'<script type="application/json" data-nodewire-state="'+c.id+'" data-component-name="'+c.name+'">'+s+'</script>';})()}`;
+            return `\${(function(){const c=${jsExpr};if(!c||typeof c!=='object'||!c.getState||typeof c.getState!=='function'){return'';}const s=JSON.stringify(c.getState());return'<script type="application/json" data-nodewire-state="'+c.id+'" data-component-name="'+c.name+'">'+s+'</script>';})()}`;
         });
 
-        // @component(componentName) - renderiza un componente NodeWire
-        // Busca el componente en el contexto de datos y lo renderiza
+        // @component(componentName) o @component(variable) o @component(variable, { args })
+        // Soporta tanto nombres de string como variables directas, con o sin argumentos
+        // Procesar @component con argumentos usando un enfoque más robusto que cuenta llaves
+        const componentWithArgsPattern = /@component\s*\(\s*([^,)]+)\s*,\s*(\{)/g;
+        let match;
+        let lastIndex = 0;
+        let result = '';
+        
+        while ((match = componentWithArgsPattern.exec(content)) !== null) {
+            result += content.substring(lastIndex, match.index);
+            
+            const componentExpr = match[1].trim();
+            const braceStart = match.index + match[0].length - 1; // Posición de la primera {
+            
+            // Contar llaves balanceadas para capturar el objeto completo
+            let braceCount = 0;
+            let objEnd = braceStart;
+            let inString = false;
+            let stringChar = '';
+            
+            for (let i = braceStart; i < content.length; i++) {
+                const char = content[i];
+                
+                // Manejar strings para no contar llaves dentro de strings
+                if (!inString && (char === '"' || char === "'")) {
+                    inString = true;
+                    stringChar = char;
+                } else if (inString && char === stringChar && content[i - 1] !== '\\') {
+                    inString = false;
+                } else if (!inString) {
+                    if (char === '{') braceCount++;
+                    if (char === '}') {
+                        braceCount--;
+                        if (braceCount === 0) {
+                            objEnd = i + 1;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            const argsObj = content.substring(braceStart, objEnd);
+            
+            // Buscar el paréntesis de cierre después del objeto
+            let parenEnd = objEnd;
+            while (parenEnd < content.length && content[parenEnd] !== ')') {
+                parenEnd++;
+            }
+            parenEnd++; // Incluir el paréntesis
+            
+            // Determinar si es un nombre de string o una variable
+            const isStringName = (componentExpr.startsWith("'") && componentExpr.endsWith("'")) ||
+                                (componentExpr.startsWith('"') && componentExpr.endsWith('"'));
+            
+            if (isStringName) {
+                // @component('name', { args })
+                const componentName = componentExpr.slice(1, -1);
+                const jsArgs = this.convertObjectLiteral(argsObj.trim());
+                result += `\${(function(){const nwm=data._nodeWireManager;if(!nwm){return'';}const baseComp=data.${componentName};if(!baseComp||typeof baseComp!=='object'){return'';}const args=${jsArgs};const newComp=nwm.createComponentWithOptions(baseComp.name,args);const te=nwm.getTemplateEngine(data._viewsPath);return newComp.render(te);})()}`;
+            } else {
+                // @component(variable, { args })
+                const jsExpr = this.convertBladeExpression(componentExpr);
+                const jsArgs = this.convertObjectLiteral(argsObj.trim());
+                result += `\${(function(){const nwm=data._nodeWireManager;if(!nwm){return'';}const baseComp=${jsExpr};if(!baseComp||typeof baseComp!=='object'||!baseComp.name){return'';}const args=${jsArgs};const newComp=nwm.createComponentWithOptions(baseComp.name,args);const te=nwm.getTemplateEngine(data._viewsPath);return newComp.render(te);})()}`;
+            }
+            
+            lastIndex = parenEnd;
+        }
+        
+        result += content.substring(lastIndex);
+        content = result;
+        
+        // Procesar nombres de string sin argumentos: @component('componentName')
         content = content.replace(/@component\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (match, componentName) => {
             return `\${(function(){const c=data.${componentName};if(!c||typeof c!=='object'||!c.render||typeof c.render!=='function'){return'';}const nwm=data._nodeWireManager;if(!nwm){return'';}const te=nwm.getTemplateEngine(data._viewsPath);return c.render(te);})()}`;
+        });
+        
+        // Finalmente procesar variables directas sin argumentos: @component(variable)
+        content = content.replace(/@component\s*\(\s*([^)]+)\s*\)/g, (match, componentExpr) => {
+            // Si ya fue procesado (contiene data. o comillas), saltarlo
+            if (componentExpr.includes('data.') || componentExpr.includes("'") || componentExpr.includes('"') || componentExpr.includes('{')) {
+                return match;
+            }
+            const jsExpr = this.convertBladeExpression(componentExpr.trim());
+            return `\${(function(){const c=${jsExpr};if(!c||typeof c!=='object'||!c.render||typeof c.render!=='function'){return'';}const nwm=data._nodeWireManager;if(!nwm){return'';}const te=nwm.getTemplateEngine(data._viewsPath);return c.render(te);})()}`;
         });
 
         return content;
@@ -311,6 +434,9 @@ export class BladeParser {
 
     private convertBladeExpression(expression: string): string {
         // Convertir expresiones de Blade a JavaScript
+        
+        // Obtener variables de loop que no deben convertirse
+        const loopVariables = (this as any)._loopVariables as Set<string> || new Set<string>();
         
         // Palabras clave de JavaScript que no deben convertirse
         const jsKeywords = new Set(['true', 'false', 'null', 'undefined', 'this', 'new', 'typeof', 'instanceof', 'in', 'of', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'function', 'var', 'let', 'const']);
@@ -372,6 +498,12 @@ export class BladeParser {
                 continue;
             }
             
+            // Si la primera parte es una variable de loop, no convertir
+            if (loopVariables.has(firstPart)) {
+                // Es una variable local del loop, dejar como está
+                continue;
+            }
+            
             const rest = parts.slice(1).join('.');
             const replacement = `data.${firstPart}.${rest}`;
             replacements.push({ start: matchStart, end: matchEnd, replacement });
@@ -411,6 +543,12 @@ export class BladeParser {
                 continue;
             }
             
+            // Si es una variable de loop, no convertir
+            if (loopVariables.has(varName)) {
+                // Es una variable local del loop, dejar como está
+                continue;
+            }
+            
             // Es una variable simple, convertirla
             const replacement = `data.${varName}`;
             replacements.push({ start: matchStart, end: matchEnd, replacement });
@@ -436,5 +574,87 @@ export class BladeParser {
         // Convertir condiciones de Blade a JavaScript
         // Usar el mismo método que convertBladeExpression
         return this.convertBladeExpression(condition);
+    }
+
+    /**
+     * Convierte un objeto literal de Blade a JavaScript
+     * Ejemplo: { initialValue: user.id } -> { initialValue: user.id }
+     * Procesa las expresiones dentro del objeto pero mantiene la estructura
+     */
+    private convertObjectLiteral(objLiteral: string): string {
+        // Remover las llaves externas para procesar el contenido
+        const trimmed = objLiteral.trim();
+        if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+            // Si no es un objeto literal, usar convertBladeExpression normal
+            return this.convertBladeExpression(objLiteral);
+        }
+        
+        const content = trimmed.slice(1, -1).trim(); // Contenido sin las llaves
+        
+        if (!content) {
+            return '{}';
+        }
+        
+        // Dividir por comas, pero respetando comas dentro de objetos/arrays anidados
+        const properties: string[] = [];
+        let currentProp = '';
+        let depth = 0;
+        let inString = false;
+        let stringChar = '';
+        
+        for (let i = 0; i < content.length; i++) {
+            const char = content[i];
+            
+            // Manejar strings
+            if (!inString && (char === '"' || char === "'")) {
+                inString = true;
+                stringChar = char;
+                currentProp += char;
+            } else if (inString && char === stringChar && content[i - 1] !== '\\') {
+                inString = false;
+                currentProp += char;
+            } else if (!inString) {
+                // Contar profundidad de objetos/arrays
+                if (char === '{' || char === '[') {
+                    depth++;
+                    currentProp += char;
+                } else if (char === '}' || char === ']') {
+                    depth--;
+                    currentProp += char;
+                } else if (char === ',' && depth === 0) {
+                    // Coma al nivel superior, dividir propiedad
+                    properties.push(currentProp.trim());
+                    currentProp = '';
+                } else {
+                    currentProp += char;
+                }
+            } else {
+                currentProp += char;
+            }
+        }
+        
+        // Agregar la última propiedad
+        if (currentProp.trim()) {
+            properties.push(currentProp.trim());
+        }
+        
+        // Procesar cada propiedad: key: value
+        const processedProps = properties.map(prop => {
+            const colonIndex = prop.indexOf(':');
+            if (colonIndex === -1) {
+                // Propiedad sin valor, usar convertBladeExpression
+                return this.convertBladeExpression(prop.trim());
+            }
+            
+            const key = prop.substring(0, colonIndex).trim();
+            const value = prop.substring(colonIndex + 1).trim();
+            
+            // Convertir el valor (puede ser una expresión compleja)
+            const convertedValue = this.convertBladeExpression(value);
+            
+            return `${key}: ${convertedValue}`;
+        });
+        
+        return `{ ${processedProps.join(', ')} }`;
     }
 }
