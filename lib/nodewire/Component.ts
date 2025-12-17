@@ -1,13 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
 
-export class Component {
+export abstract class Component {
     public id: string;
     public readonly name: string;
     /**
      * Ruta de la vista del componente (ej: 'components/counter')
-     * Si no se define, se usa components/{nombre-sin-Component}
+     * Obligatoria: si no se define, se lanzará un error en tiempo de ejecución.
      */
-    public view?: string;
+    public abstract view: string;
 
     constructor(name: string, id?: string) {
         this.id = id || uuidv4();
@@ -19,9 +19,10 @@ export class Component {
      * Inyecta automáticamente el estado inicial del componente para el runtime.
      */
     public render(templateEngine: any): string {
-        // Resolver la vista: usar propiedad view o fallback components/{nombreSinSuffix}
-        const fallbackView = `components/${this.name.toLowerCase().replace(/component$/, '')}`;
-        const viewPath = this.view || fallbackView;
+        const viewPath = this.view?.trim();
+        if (!viewPath) {
+            throw new Error(`[NodeWire] El componente "${this.name}" debe definir la propiedad "view" (ej: 'components/mi-componente').`);
+        }
 
         const html = templateEngine.render(viewPath, { component: this });
 
