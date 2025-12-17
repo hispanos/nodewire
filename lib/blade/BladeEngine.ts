@@ -78,9 +78,23 @@ export class BladeEngine {
         // Compilar a JavaScript
         const compiledCode = this.compiler.compile(parsed, templateName, this);
 
+        // DEBUG: Mostrar código generado para welcome
+        if (templateName === 'welcome') {
+            console.log('\n========== CÓDIGO GENERADO ==========');
+            console.log(compiledCode);
+            console.log('=====================================\n');
+        }
+
         // Crear función ejecutable con acceso al engine para layouts recursivos
         const compiledFunction = (data: any) => {
-            return new Function('data', 'engine', compiledCode)(data, this);
+            try {
+                return new Function('data', 'engine', compiledCode)(data, this);
+            } catch (error: any) {
+                console.error('\n========== ERROR EN CÓDIGO ==========');
+                console.error(compiledCode);
+                console.error('=====================================\n');
+                throw error;
+            }
         };
 
         // Guardar en cache si está habilitado
@@ -111,5 +125,19 @@ export class BladeEngine {
         const normalizedPath = templatePath.replace(/\.view$/, '');
         const fullPath = path.join(this.config.viewsPath, `${normalizedPath}.view`);
         return fs.existsSync(fullPath);
+    }
+
+    /**
+     * Renderiza contenido Blade directamente desde un string
+     * Útil para renderizar contenido dinámico como el que se pasa a componentes
+     */
+    public renderString(templateContent: string, data: any = {}): string {
+        try {
+            const compiled = this.compile(templateContent, '__inline__');
+            return compiled(data);
+        } catch (error: any) {
+            console.error(`[Blade] Error renderizando contenido inline:`, error);
+            throw error;
+        }
     }
 }

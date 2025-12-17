@@ -18,6 +18,8 @@
         <div style="margin-bottom: 20px;">
             <h3>Contador (por nombre):</h3>
             @component('counterComponent1')
+            <p>Hola</p>
+            @endcomponent
         </div>
     @endif
 

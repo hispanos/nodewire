@@ -35,4 +35,10 @@
             +
         </button>
     </div>
+    
+    @if (_content)
+        <div style="margin-top: 20px; padding: 15px; background: white; border-radius: 5px;">
+            @content
+        </div>
+    @endif
 </div>

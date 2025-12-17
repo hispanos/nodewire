@@ -98,7 +98,7 @@ export class BladeParser {
         result += content.substring(lastIndex);
         content = result;
         
-        // @content - renderiza el contenido principal del layout
+        // @content - renderiza el contenido principal del layout o el contenido pasado a componentes
         // Usar \b para asegurar que sea una palabra completa
         content = content.replace(/@content\b/g, '${data._content || \'\'}');
         
@@ -122,14 +122,51 @@ export class BladeParser {
     }
 
     private processComponents(content: string, result: ParsedTemplate, viewsPath: string): string {
-        const componentRegex = /@component\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*\[([^\]]+)\])?\s*\)\s*([\s\S]*?)@endcomponent/g;
-        let match;
+        // Buscar componentes con @endcomponent de forma más precisa
+        // Solo procesar componentes que tienen @endcomponent inmediatamente después (no dentro de @if sin @endcomponent)
         let processed = content;
+        let searchIndex = 0;
 
-        while ((match = componentRegex.exec(content)) !== null) {
-            const componentName = match[1];
-            const propsString = match[2] || '';
-            const slotContent = match[3].trim();
+        while (true) {
+            const componentMatch = processed.substring(searchIndex).match(/@component\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*\[([^\]]+)\])?\s*\)/);
+            if (!componentMatch) break;
+
+            const componentStart = searchIndex + componentMatch.index!;
+            const componentEnd = componentStart + componentMatch[0].length;
+            const afterComponent = processed.substring(componentEnd);
+
+            // Buscar el @endcomponent más cercano, pero solo si no hay un @endif antes
+            // Esto evita capturar componentes dentro de @if sin @endcomponent
+            const endComponentMatch = afterComponent.match(/@endcomponent/);
+            if (!endComponentMatch) {
+                // No tiene @endcomponent, saltarlo (será procesado por processNodeWireDirectives)
+                searchIndex = componentEnd;
+                continue;
+            }
+
+            // Verificar que el @endcomponent esté cerca (dentro de 200 caracteres) y sin @if/@endif intermedios
+            // Esto evita capturar @endcomponent que pertenecen a otros componentes
+            const beforeEndComponent = afterComponent.substring(0, endComponentMatch.index!);
+            
+            // Si el @endcomponent está muy lejos (más de 200 caracteres), probablemente pertenece a otro componente
+            if (endComponentMatch.index! > 200) {
+                searchIndex = componentEnd;
+                continue;
+            }
+            
+            // Si hay un @if o @endif antes del @endcomponent, probablemente el @endcomponent pertenece a otro componente
+            // que está dentro de un @if
+            if (beforeEndComponent.match(/@if\s*\(/) || beforeEndComponent.match(/@endif/)) {
+                searchIndex = componentEnd;
+                continue;
+            }
+
+            const slotContentStart = componentEnd;
+            const slotContentEnd = componentEnd + endComponentMatch.index!;
+            const slotContent = processed.substring(slotContentStart, slotContentEnd).trim();
+
+            const componentName = componentMatch[1];
+            const propsString = componentMatch[2] || '';
 
             // Parsear props
             const props: Record<string, any> = {};
@@ -158,7 +195,21 @@ export class BladeParser {
                 slot: slotContent
             });
 
-            processed = processed.replace(match[0], `<!--COMPONENT:${componentName}-->`);
+            // Si hay contenido (slotContent), generar código que renderice el componente con el contenido
+            if (slotContent.trim()) {
+                // Escapar el contenido para JavaScript usando JSON.stringify
+                const escapedContent = JSON.stringify(slotContent);
+                // Generar código simple y directo
+                const replacement = `\${(function(){const c=data.${componentName};if(!c){return'';}const be=data._bladeEngine;if(!be){return'';}const nwm=data._nodeWireManager;if(!nwm){return'';}try{const slotText=${escapedContent};const renderedContent=be.renderString(slotText,data);const te=nwm.getTemplateEngine(data._viewsPath);const compName=c.name.toLowerCase().replace(/component$/,'');const html=te.render('components/'+compName,{component:c,_content:renderedContent});return html||'';}catch(e){console.error('[Blade] Error renderizando componente ${componentName}:',e);return'';}})()}`;
+                const endPos = slotContentEnd + '@endcomponent'.length;
+                processed = processed.substring(0, componentStart) + replacement + processed.substring(endPos);
+                searchIndex = componentStart + replacement.length;
+            } else {
+                // Sin contenido, usar el marcador normal que será procesado por processNodeWireDirectives
+                const endPos = slotContentEnd + '@endcomponent'.length;
+                processed = processed.substring(0, componentStart) + `<!--COMPONENT:${componentName}-->` + processed.substring(endPos);
+                searchIndex = componentStart + `<!--COMPONENT:${componentName}-->`.length;
+            }
         }
 
         return processed;
@@ -399,7 +450,14 @@ export class BladeParser {
         content = result;
         
         // Procesar nombres de string sin argumentos: @component('componentName')
-        content = content.replace(/@component\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (match, componentName) => {
+        // Solo procesar si NO tiene @endcomponent después (los que tienen @endcomponent ya fueron procesados en processComponents)
+        content = content.replace(/@component\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (match, componentName, offset, string) => {
+            // Verificar si hay @endcomponent después de este @component
+            const afterMatch = string.substring(offset + match.length);
+            if (afterMatch.match(/@endcomponent/)) {
+                // Tiene @endcomponent, ya fue procesado en processComponents, dejarlo como está
+                return match;
+            }
             return `\${(function(){const c=data.${componentName};if(!c||typeof c!=='object'||!c.render||typeof c.render!=='function'){return'';}const nwm=data._nodeWireManager;if(!nwm){return'';}const te=nwm.getTemplateEngine(data._viewsPath);return c.render(te);})()}`;
         });
         

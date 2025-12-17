@@ -181,7 +181,8 @@ export abstract class BaseController {
             const viewData = {
                 ...data,
                 _nodeWireManager: nodeWireManager,
-                _viewsPath: viewsPath
+                _viewsPath: viewsPath,
+                _bladeEngine: bladeEngine
             };
             
             // Si hay layout, preparar datos con secciones
