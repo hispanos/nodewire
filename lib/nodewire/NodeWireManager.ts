@@ -157,6 +157,7 @@ export class NodeWireManager {
 
     /**
      * Maneja una llamada desde el cliente
+     * @param onReactiveUpdate Callback opcional que se llama cuando cambian propiedades reactivas ($) durante métodos asíncronos
      */
     public async handleComponentCall(
         id: string,
@@ -164,7 +165,8 @@ export class NodeWireManager {
         method: string,
         args: any[] = [],
         state: Record<string, any>,
-        viewsPath?: string
+        viewsPath?: string,
+        onReactiveUpdate?: (updates: Record<string, any>, html: string, newState: Record<string, any>) => void
     ): Promise<{ success: boolean; html?: string; error?: string; newState?: Record<string, any>; updates?: Record<string, any> }> {
         try {
             const effectiveViewsPath = viewsPath || this.viewsPath;
@@ -239,7 +241,77 @@ export class NodeWireManager {
                 throw new Error(`Método ${method} no existe en ${componentName}`);
             }
 
-            await (component as any)[method](...args);
+            // Detectar si el método es asíncrono y monitorear propiedades reactivas
+            // IMPORTANTE: Capturar el estado ANTES de ejecutar el método para poder detectar cambios
+            const reactiveProps = this.getReactiveProperties(component);
+            const initialStateBeforeMethod: Record<string, any> = {};
+            for (const prop of reactiveProps) {
+                initialStateBeforeMethod[prop] = (component as any)[prop];
+            }
+
+            const methodResult = (component as any)[method](...args);
+            const isAsync = methodResult instanceof Promise;
+
+            if (isAsync && onReactiveUpdate) {
+                // Monitorear propiedades reactivas durante la ejecución asíncrona
+                console.log(`[NodeWire] Método asíncrono detectado. Monitoreando propiedades reactivas:`, reactiveProps);
+                console.log(`[NodeWire] Estado inicial ANTES del método:`, initialStateBeforeMethod);
+                
+                const lastReactiveState: Record<string, any> = { ...initialStateBeforeMethod };
+
+                // Función para verificar y enviar actualizaciones
+                const checkAndSendUpdates = () => {
+                    const reactiveUpdates: Record<string, any> = {};
+                    let hasChanges = false;
+
+                    for (const prop of reactiveProps) {
+                        const currentValue = (component as any)[prop];
+                        const lastValue = lastReactiveState[prop];
+                        
+                        if (JSON.stringify(currentValue) !== JSON.stringify(lastValue)) {
+                            console.log(`[NodeWire] 🔄 Cambio detectado en ${prop}:`, lastValue, '->', currentValue);
+                            reactiveUpdates[prop] = currentValue;
+                            lastReactiveState[prop] = JSON.parse(JSON.stringify(currentValue));
+                            hasChanges = true;
+                        }
+                    }
+
+                    if (hasChanges) {
+                        console.log(`[NodeWire] 📤 Enviando actualización reactiva:`, reactiveUpdates);
+                        // Renderizar solo los elementos afectados
+                        const html = component.render(this.getTemplateEngine(effectiveViewsPath));
+                        const newState = component.getState();
+                        onReactiveUpdate(reactiveUpdates, html, newState);
+                    }
+                };
+
+                // Verificar inmediatamente después de ejecutar el método (por si cambió síncronamente)
+                // Usar setTimeout(0) para asegurar que el método haya terminado de ejecutarse síncronamente
+                setTimeout(() => {
+                    checkAndSendUpdates();
+                }, 0);
+
+                // Polling para detectar cambios en propiedades reactivas
+                const checkInterval = setInterval(checkAndSendUpdates, 50); // Verificar cada 50ms
+
+                // Limpiar el intervalo cuando el método termine
+                try {
+                    await methodResult;
+                    console.log(`[NodeWire] Método asíncrono completado. Verificando cambios finales...`);
+                } finally {
+                    // Verificar una última vez después de que el método termine
+                    // Esto captura cambios que ocurren en el finally del método (como $loading = false)
+                    // Usar process.nextTick para verificar en el siguiente tick del event loop
+                    process.nextTick(() => {
+                        checkAndSendUpdates();
+                        clearInterval(checkInterval);
+                        console.log(`[NodeWire] Polling limpiado.`);
+                    });
+                }
+            } else {
+                // Método síncrono, ejecutar normalmente
+                await methodResult;
+            }
 
             // Obtener el nuevo estado
             const newState = component.getState();
@@ -339,6 +411,96 @@ export class NodeWireManager {
         let markedCount = 0;
         
         console.log('[NodeWire] Auto-marcando propiedades. Estado:', state, 'ComponentId:', componentId);
+        
+        // Primero, marcar elementos que dependen de propiedades reactivas ($)
+        // Buscar elementos que están cerca de contenido condicional o atributos condicionales
+        const reactiveProps = Object.keys(state).filter(key => key.startsWith('$'));
+        for (const propName of reactiveProps) {
+            const propValue = state[propName];
+            
+            console.log(`[NodeWire] Buscando elementos reactivos para propiedad "${propName}" con valor "${propValue}"`);
+            
+            // Buscar botones que tienen data-nw-event y que podrían tener contenido condicional
+            // Estos son los elementos que más probablemente dependen de propiedades reactivas
+            const buttonWithEventRegex = new RegExp(
+                `(<button[^>]*data-nw-event-[^>]*)(?![^>]*data-nodewire-prop)([^>]*>)`,
+                'gi'
+            );
+            
+            html = html.replace(buttonWithEventRegex, (match, openTagStart, openTagEnd) => {
+                if (openTagStart.includes('data-nodewire-prop')) {
+                    return match;
+                }
+                
+                // Verificar si el botón está cerca de contenido que cambia según la propiedad reactiva
+                // Buscar el contenido del botón después del tag de apertura
+                const matchIndex = html.indexOf(match);
+                if (matchIndex === -1) return match;
+                
+                // Buscar el contenido del botón (hasta el cierre)
+                const afterOpenTag = html.substring(matchIndex + match.length);
+                const closeTagIndex = afterOpenTag.indexOf('</button>');
+                if (closeTagIndex === -1) return match;
+                
+                const buttonContent = afterOpenTag.substring(0, closeTagIndex);
+                
+                // Si el contenido contiene texto que podría cambiar (como "Cargando..." o "-")
+                // o si el botón tiene disabled, marcarlo
+                const hasLoadingText = /Cargando|Loading|-/.test(buttonContent);
+                const hasDisabled = openTagStart.includes('disabled') || openTagEnd.includes('disabled');
+                
+                if (hasLoadingText || hasDisabled) {
+                    console.log(`[NodeWire] ✅ Marcando botón reactivo para propiedad "${propName}"`);
+                    markedCount++;
+                    const newOpenTag = openTagStart + ` data-nodewire-id="${componentId}" data-nodewire-prop="${propName}"` + openTagEnd;
+                    return newOpenTag;
+                }
+                
+                return match;
+            });
+            
+            // También buscar elementos con atributo disabled (independientemente del valor de la propiedad)
+            const disabledElementRegex = new RegExp(
+                `(<([a-zA-Z][a-zA-Z0-9]*)(?![^>]*data-nodewire-prop)[^>]*disabled[^>]*>)`,
+                'gi'
+            );
+            html = html.replace(disabledElementRegex, (match, openTag) => {
+                if (openTag.includes('data-nodewire-prop')) {
+                    return match;
+                }
+                // Marcar siempre si tiene disabled, porque puede cambiar dinámicamente
+                console.log(`[NodeWire] ✅ Marcando elemento con disabled para propiedad "${propName}"`);
+                markedCount++;
+                const newOpenTag = openTag.replace(
+                    />$/,
+                    ` data-nodewire-id="${componentId}" data-nodewire-prop="${propName}">`
+                );
+                return newOpenTag;
+            });
+            
+            // Buscar elementos que contienen texto que cambia según la propiedad reactiva
+            // Buscar tanto "Cargando..." como "-" (el texto alternativo)
+            const loadingTextRegex = new RegExp(
+                '(<([a-zA-Z][a-zA-Z0-9]*)(?![^>]*data-nodewire-prop)[^>]*>)([^<]*(?:Cargando|Loading|-)[^<]*)(</\\2>)',
+                'gi'
+            );
+            html = html.replace(loadingTextRegex, (match, openTag, tagName, content, closeTag) => {
+                if (openTag.includes('data-nodewire-prop')) {
+                    return match;
+                }
+                // Marcar si contiene texto que podría cambiar
+                if (content.includes('Cargando') || content.includes('Loading') || content.trim() === '-') {
+                    console.log(`[NodeWire] ✅ Marcando elemento con contenido reactivo: ${tagName} para propiedad "${propName}"`);
+                    markedCount++;
+                    const newOpenTag = openTag.replace(
+                        />$/,
+                        ` data-nodewire-id="${componentId}" data-nodewire-prop="${propName}">`
+                    );
+                    return `${newOpenTag}${content}${closeTag}`;
+                }
+                return match;
+            });
+        }
         
         // Para cada propiedad del estado, buscar elementos que contengan ese valor
         for (const [propName, propValue] of Object.entries(state)) {
@@ -468,6 +630,14 @@ export class NodeWireManager {
         return html;
     }
     
+    /**
+     * Obtiene las propiedades reactivas (que empiezan con $) de un componente
+     */
+    private getReactiveProperties(component: Component): string[] {
+        const state = component.getState();
+        return Object.keys(state).filter(key => key.startsWith('$'));
+    }
+
     /**
      * Escapa caracteres especiales para usar en expresiones regulares
      */

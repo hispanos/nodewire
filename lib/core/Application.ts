@@ -408,16 +408,36 @@ export class Application {
                     const data = JSON.parse(message.toString());
                     const { id, component, method, args = [], state, requestId } = data;
 
+                    // Callback para enviar actualizaciones reactivas durante métodos asíncronos
+                    const onReactiveUpdate = (updates: Record<string, any>, html: string, newState: Record<string, any>) => {
+                        console.log('[NodeWire] 📡 onReactiveUpdate llamado, enviando actualización:', { updates, requestId });
+                        // Enviar actualización reactiva al cliente
+                        try {
+                            ws.send(JSON.stringify({
+                                type: 'stateUpdate',
+                                requestId,
+                                componentId: id,
+                                updates,
+                                html,
+                                newState
+                            }));
+                            console.log('[NodeWire] ✅ Mensaje stateUpdate enviado correctamente');
+                        } catch (error) {
+                            console.error('[NodeWire] ❌ Error enviando stateUpdate:', error);
+                        }
+                    };
+
                     const result = await this.nodeWireManager.handleComponentCall(
                         id,
                         component,
                         method,
                         args,
                         state,
-                        this.config.viewsPath
+                        this.config.viewsPath,
+                        onReactiveUpdate
                     );
 
-                    // Enviar respuesta con el requestId para que el cliente pueda hacer match
+                    // Enviar respuesta final con el requestId para que el cliente pueda hacer match
                     ws.send(JSON.stringify({
                         ...result,
                         requestId
