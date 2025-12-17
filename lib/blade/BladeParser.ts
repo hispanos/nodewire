@@ -270,7 +270,6 @@ export class BladeParser {
     private processLoops(content: string): string {
         // @foreach - convertir a expresión JavaScript
         // Soporta: @foreach(items as item) y @foreach(items as key => value)
-        // También soporta variables con o sin prefijo $
         const foreachRegex = /@foreach\s*\(\s*([^)]+)\s*\)/g;
         let lastIndex = 0;
         let result = '';
@@ -282,11 +281,11 @@ export class BladeParser {
         const tempMatches = [...tempContent.matchAll(/@foreach\s*\(\s*([^)]+)\s*\)/g)];
         for (const tempMatch of tempMatches) {
             const loopExpr = tempMatch[1].trim();
-            const loopMatch = loopExpr.match(/(\$?\w+)\s+as\s+(\$?\w+)(?:\s*=>\s*(\$?\w+))?/);
+            const loopMatch = loopExpr.match(/(\w+)\s+as\s+(\w+)(?:\s*=>\s*(\w+))?/);
             if (loopMatch) {
-                loopVariables.add(loopMatch[2].replace(/^\$/, ''));
+                loopVariables.add(loopMatch[2]);
                 if (loopMatch[3]) {
-                    loopVariables.add(loopMatch[3].replace(/^\$/, ''));
+                    loopVariables.add(loopMatch[3]);
                 }
             }
         }
@@ -299,13 +298,12 @@ export class BladeParser {
             const loopExpr = match[1].trim();
             
             // Parsear: items as item o items as key => value
-            // Soporta con o sin prefijo $
-            const loopMatch = loopExpr.match(/(\$?\w+)\s+as\s+(\$?\w+)(?:\s*=>\s*(\$?\w+))?/);
+            const loopMatch = loopExpr.match(/(\w+)\s+as\s+(\w+)(?:\s*=>\s*(\w+))?/);
             
             if (loopMatch) {
-                const itemsVar = loopMatch[1].replace(/^\$/, ''); // Remover $ si existe
-                const valueVar = loopMatch[2].replace(/^\$/, ''); // Remover $ si existe
-                const keyVar = loopMatch[3] ? loopMatch[3].replace(/^\$/, '') : null;
+                const itemsVar = loopMatch[1];
+                const valueVar = loopMatch[2];
+                const keyVar = loopMatch[3] || null;
                 
                 // Convertir a JavaScript: for (const [key, value] of Object.entries(data.items)) { ... }
                 if (keyVar) {
@@ -523,16 +521,6 @@ export class BladeParser {
         // Palabras clave de JavaScript que no deben convertirse
         const jsKeywords = new Set(['true', 'false', 'null', 'undefined', 'this', 'new', 'typeof', 'instanceof', 'in', 'of', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'function', 'var', 'let', 'const']);
         
-        // Variables con $ (compatibilidad con formato anterior)
-        expression = expression.replace(/\$(\w+)/g, 'data.$1');
-        
-        // Acceso a propiedades $var->prop o $var['key']
-        expression = expression.replace(/\$(\w+)->(\w+)/g, 'data.$1.$2');
-        expression = expression.replace(/\$(\w+)\[['"](\w+)['"]\]/g, 'data.$1.$2');
-        
-        // Métodos comunes de Blade
-        expression = expression.replace(/\$(\w+)->(\w+)\(\)/g, 'data.$1.$2()');
-        
         // Encontrar todas las variables y propiedades anidadas para procesarlas
         // Primero buscar propiedades anidadas (con puntos), luego variables simples
         const replacements: Array<{ start: number, end: number, replacement: string }> = [];
@@ -547,9 +535,10 @@ export class BladeParser {
             );
         };
         
-        // Primero procesar propiedades anidadas (ej: example.test.property)
+        // Primero procesar propiedades anidadas (ej: example.test.property o component.$loading)
         // Buscar patrones que tengan al menos un punto
-        const nestedRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\b/g;
+        // Permite variables que empiecen con $ después del punto
+        const nestedRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*\.[\$a-zA-Z_][\$a-zA-Z0-9_]*(?:\.[\$a-zA-Z_][\$a-zA-Z0-9_]*)*)\b/g;
         let nestedMatch;
         
         while ((nestedMatch = nestedRegex.exec(expression)) !== null) {
@@ -593,7 +582,8 @@ export class BladeParser {
         }
         
         // Ahora procesar variables simples (sin puntos)
-        const simpleVarRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g;
+        // Permite variables que empiecen con $
+        const simpleVarRegex = /\b([\$a-zA-Z_][\$a-zA-Z0-9_]*)\b/g;
         let simpleMatch;
         
         while ((simpleMatch = simpleVarRegex.exec(expression)) !== null) {

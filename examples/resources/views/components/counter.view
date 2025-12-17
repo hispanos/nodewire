@@ -13,9 +13,9 @@
             style="padding: 12px 24px; font-size: 18px; background: #dc3545; color: white; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s;"
             onmouseover="this.style.transform='scale(1.05)'"
             onmouseout="this.style.transform='scale(1)'"
-            @if(component.loading)disabled @endif
+            @if(component.$loading)disabled @endif
         >
-        @if (component.loading) Cargando... @else - @endif
+        @if (component.$loading) Cargando... @else - @endif
         </button>
         
         <button 

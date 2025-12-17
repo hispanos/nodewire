@@ -3,7 +3,7 @@ import { Component } from "framework-mvc-nodewire";
 export class CounterComponent extends Component {
   public count: number = 0;
   public view: string = "components/counter";
-  public loading: boolean = false;
+  public $loading: boolean = false;
 
   constructor(initialValue: number = 0, id?: string) {
     super("CounterComponent", id);
@@ -17,12 +17,12 @@ export class CounterComponent extends Component {
   }
 
   public async decrement(): Promise<void> {
-    this.loading = true;
+    this.$loading = true;
     try {
       await new Promise((res) => setTimeout(res, 3000)); // tu espera
       this.count -= 1;
     } finally {
-      this.loading = false;
+      this.$loading = false;
     }
     console.log(`[NodeWire] Contador decrementado a ${this.count}`);
   }
