@@ -377,7 +377,7 @@ export class BladeParser {
 
     /**
      * Procesa atributos de eventos con sintaxis (evento)="metodo"
-     * Los convierte a data-nw-event="evento" data-nw-method="metodo"
+     * Los convierte a data-nw-event-{evento}="metodo" para soportar múltiples eventos
      * Soporta todos los eventos HTML estándar
      */
     private processEventAttributes(content: string): string {
@@ -385,12 +385,31 @@ export class BladeParser {
         // El patrón busca: (evento) seguido de = y luego comillas con el método
         // Soporta espacios opcionales alrededor del =
         // Captura nombres de eventos que pueden tener guiones (ej: touch-start)
+        // Usar un enfoque más robusto que procese todos los eventos, incluso si están en la misma línea
         const eventAttributeRegex = /\(([a-zA-Z][a-zA-Z0-9-]*)\)\s*=\s*["']([^"']+)["']/g;
         
-        return content.replace(eventAttributeRegex, (match, eventName, method) => {
-            // Convertir a data-nw-event y data-nw-method
-            return `data-nw-event="${eventName}" data-nw-method="${method}"`;
-        });
+        let match;
+        let lastIndex = 0;
+        let result = '';
+        
+        // Procesar todos los matches de forma iterativa para asegurar que todos se procesen
+        while ((match = eventAttributeRegex.exec(content)) !== null) {
+            // Agregar el texto antes del match
+            result += content.substring(lastIndex, match.index);
+            
+            // Convertir el atributo de evento
+            const eventName = match[1];
+            const method = match[2];
+            const replacement = `data-nw-event-${eventName}="${method}"`;
+            
+            result += replacement;
+            lastIndex = match.index + match[0].length;
+        }
+        
+        // Agregar el texto restante
+        result += content.substring(lastIndex);
+        
+        return result;
     }
 
     private processNodeWireDirectives(content: string): string {

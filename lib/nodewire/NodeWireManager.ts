@@ -407,7 +407,7 @@ export class NodeWireManager {
             });
         }
         
-        // También marcar elementos con data-nw-event que estén dentro del componente
+        // También marcar elementos con data-nw-event-{eventType} que estén dentro del componente
         // Buscar el script de estado del componente usando regex
         const stateScriptRegex = new RegExp(
             `<script[^>]*data-nodewire-state="${this.escapeRegex(componentId)}"[^>]*>`,
@@ -430,9 +430,10 @@ export class NodeWireManager {
                 // Extraer la sección del componente (desde después del script hasta el siguiente script o final)
                 const componentSection = html.substring(scriptCloseIndex + 9, sectionEnd);
                 
-                // Buscar elementos con data-nw-event que no tengan data-nodewire-id
-                // Buscar cualquier elemento HTML (no solo button) con data-nw-event
-                const eventElementRegex = /(<[a-zA-Z][^>]*data-nw-event[^>]*)(?![^>]*data-nodewire-id)([^>]*>)/gi;
+                // Buscar elementos con data-nw-event-{eventType} que no tengan data-nodewire-id
+                // Buscar cualquier elemento HTML con atributos data-nw-event-* (puede tener múltiples)
+                // El regex busca elementos que tengan al menos un atributo data-nw-event- seguido de cualquier carácter válido
+                const eventElementRegex = /(<[a-zA-Z][^>]*data-nw-event-[a-zA-Z0-9-]+[^>]*)(?![^>]*data-nodewire-id)([^>]*>)/gi;
                 const buttonMatches: Array<{match: string, index: number}> = [];
                 
                 let match;
