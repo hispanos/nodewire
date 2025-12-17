@@ -15,6 +15,7 @@ const router = new Router();
 // El Router se encarga de todo: crear instancia, registrar componentes, hacer bind
 router.get('/', HomeController, 'index');
 router.get('/test-blade', HomeController, 'testBlade');
+router.get('/users', HomeController, 'users');
 
 // Registrar rutas en la aplicación
 app.use(router);

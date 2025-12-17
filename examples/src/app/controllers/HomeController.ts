@@ -1,12 +1,14 @@
 import { BaseController } from 'framework-mvc-nodewire';
 import { CounterComponent } from '../Components/CounterComponent';
 import { HeaderComponent } from '../Components/HeaderComponent';
+import { UsersComponent } from '../Components/UsersComponent';
 
 export class HomeController extends BaseController {
     // Definir los componentes que este controlador necesita
     protected static components = {
         'CounterComponent': CounterComponent,
-        'HeaderComponent': HeaderComponent
+        'HeaderComponent': HeaderComponent,
+        'UsersComponent': UsersComponent
     };
 
     public async index() {
@@ -58,6 +60,31 @@ export class HomeController extends BaseController {
             htmlContent: '<strong>Este es HTML sin escape</strong>',
             example: {example1: 'example1', example2: 'example2'},
             data: {test: 'test', test2: 'test2'}
+        });
+    }
+
+    public async users() {
+        // Crear componente de usuarios con algunos usuarios iniciales
+        const usersComponent = this.components.UsersComponent({
+            initialUsers: [
+                { id: 1, name: 'Juan Pérez', email: 'juan@example.com', age: 25 },
+                { id: 2, name: 'María García', email: 'maria@example.com', age: 30 }
+            ]
+        });
+        
+        const headerComponent = this.components.HeaderComponent({ 
+            siteName: 'Gestión de Usuarios',
+            currentUser: 'Admin'
+        });
+        
+        this.render('users', {
+            title: 'Gestión de Usuarios',
+            usersComponent: usersComponent
+        }, {
+            layout: 'app',
+            sections: {
+                header: headerComponent
+            }
         });
     }
 }

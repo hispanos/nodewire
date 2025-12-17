@@ -1,0 +1,44 @@
+@nodewireState(component)
+
+<div style="padding: 20px; background: #ffffff; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+    <h2 style="color: #333; margin-bottom: 20px;">Lista de Usuarios</h2>
+    
+    <div style="margin-bottom: 20px;">
+        <button 
+            (click)="addUser"
+            style="padding: 10px 20px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; transition: all 0.3s;"
+            onmouseover="this.style.transform='scale(1.05)'"
+            onmouseout="this.style.transform='scale(1)'"
+            @if(component.$loading)disabled @endif
+        >
+            @if (component.$loading) Agregando... @else + Agregar Usuario @endif
+        </button>
+    </div>
+
+    @if (component.users && component.users.length > 0)
+        <div style="display: grid; gap: 10px;">
+            @foreach (component.users as user)
+                <div 
+                    style="padding: 15px; background: #f8f9fa; border-radius: 5px; border-left: 4px solid #667eea; display: flex; justify-content: space-between; align-items: center;"
+                >
+                    <div>
+                        <strong style="color: #333;">{{ user.name }}</strong>
+                        <div style="color: #666; font-size: 14px; margin-top: 5px;">
+                            {{ user.email }} - Edad: {{ user.age }}
+                        </div>
+                    </div>
+                    <button 
+                        (click)="removeUser({{ user.id }})"
+                        style="padding: 5px 15px; font-size: 14px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;"
+                    >
+                        Eliminar
+                    </button>
+                </div>
+            @endforeach
+        </div>
+    @else
+        <div style="padding: 20px; text-align: center; color: #666;">
+            No hay usuarios en la lista. Haz clic en "Agregar Usuario" para comenzar.
+        </div>
+    @endif
+</div>

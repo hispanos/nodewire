@@ -281,11 +281,12 @@ export class BladeParser {
         const tempMatches = [...tempContent.matchAll(/@foreach\s*\(\s*([^)]+)\s*\)/g)];
         for (const tempMatch of tempMatches) {
             const loopExpr = tempMatch[1].trim();
-            const loopMatch = loopExpr.match(/(\w+)\s+as\s+(\w+)(?:\s*=>\s*(\w+))?/);
+            // Soporta propiedades anidadas: component.users, items, etc.
+            const loopMatch = loopExpr.match(/([\w\.\$]+)\s+as\s+(\w+)(?:\s*=>\s*(\w+))?/);
             if (loopMatch) {
-                loopVariables.add(loopMatch[2]);
+                loopVariables.add(loopMatch[2]); // valueVar (user)
                 if (loopMatch[3]) {
-                    loopVariables.add(loopMatch[3]);
+                    loopVariables.add(loopMatch[3]); // keyVar (si existe)
                 }
             }
         }
@@ -297,21 +298,34 @@ export class BladeParser {
             
             const loopExpr = match[1].trim();
             
-            // Parsear: items as item o items as key => value
-            const loopMatch = loopExpr.match(/(\w+)\s+as\s+(\w+)(?:\s*=>\s*(\w+))?/);
+            // Parsear: items as item, component.users as user, o items as key => value
+            // Soporta propiedades anidadas con puntos
+            const loopMatch = loopExpr.match(/([\w\.\$]+)\s+as\s+(\w+)(?:\s*=>\s*(\w+))?/);
             
             if (loopMatch) {
-                const itemsVar = loopMatch[1];
+                const itemsVar = loopMatch[1]; // Puede ser "component.users" o "items"
                 const valueVar = loopMatch[2];
                 const keyVar = loopMatch[3] || null;
+                
+                // Convertir la variable de items a JavaScript
+                // Si tiene puntos, ya está en formato correcto (component.users -> data.component.users)
+                // Si no tiene puntos, necesita convertirse (items -> data.items)
+                let jsItemsVar: string;
+                if (itemsVar.includes('.')) {
+                    // Ya es una propiedad anidada, convertir usando convertBladeExpression
+                    jsItemsVar = this.convertBladeExpression(itemsVar);
+                } else {
+                    // Variable simple, agregar data.
+                    jsItemsVar = `data.${itemsVar}`;
+                }
                 
                 // Convertir a JavaScript: for (const [key, value] of Object.entries(data.items)) { ... }
                 if (keyVar) {
                     // Con clave y valor: @foreach(items as key => value)
-                    result += `\${(function(){let html='';const items=data.${itemsVar};if(items&&Array.isArray(items)){items.forEach((${valueVar},${keyVar})=>{html+=\``;
+                    result += `\${(function(){let html='';const items=${jsItemsVar};if(items&&Array.isArray(items)){items.forEach((${valueVar},${keyVar})=>{html+=\``;
                 } else {
-                    // Solo valor: @foreach(items as item)
-                    result += `\${(function(){let html='';const items=data.${itemsVar};if(items&&Array.isArray(items)){items.forEach((${valueVar})=>{html+=\``;
+                    // Solo valor: @foreach(items as item) o @foreach(component.users as user)
+                    result += `\${(function(){let html='';const items=${jsItemsVar};if(items&&Array.isArray(items)){items.forEach((${valueVar})=>{html+=\``;
                 }
             } else {
                 // Si no coincide el patrón, dejar como está
