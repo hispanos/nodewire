@@ -407,7 +407,7 @@ export class NodeWireManager {
             });
         }
         
-        // También marcar botones con data-nw-click que estén dentro del componente
+        // También marcar elementos con data-nw-event que estén dentro del componente
         // Buscar el script de estado del componente usando regex
         const stateScriptRegex = new RegExp(
             `<script[^>]*data-nodewire-state="${this.escapeRegex(componentId)}"[^>]*>`,
@@ -430,31 +430,32 @@ export class NodeWireManager {
                 // Extraer la sección del componente (desde después del script hasta el siguiente script o final)
                 const componentSection = html.substring(scriptCloseIndex + 9, sectionEnd);
                 
-                // Buscar botones con data-nw-click que no tengan data-nodewire-id
-                const buttonRegex = /(<button[^>]*data-nw-click[^>]*)(?![^>]*data-nodewire-id)([^>]*>)/gi;
+                // Buscar elementos con data-nw-event que no tengan data-nodewire-id
+                // Buscar cualquier elemento HTML (no solo button) con data-nw-event
+                const eventElementRegex = /(<[a-zA-Z][^>]*data-nw-event[^>]*)(?![^>]*data-nodewire-id)([^>]*>)/gi;
                 const buttonMatches: Array<{match: string, index: number}> = [];
                 
                 let match;
-                while ((match = buttonRegex.exec(componentSection)) !== null) {
+                while ((match = eventElementRegex.exec(componentSection)) !== null) {
                     buttonMatches.push({
                         match: match[0],
                         index: scriptCloseIndex + 9 + match.index
                     });
                 }
                 
-                // Reemplazar los botones de atrás hacia adelante para mantener los índices correctos
+                // Reemplazar los elementos de atrás hacia adelante para mantener los índices correctos
                 for (let i = buttonMatches.length - 1; i >= 0; i--) {
-                    const buttonMatch = buttonMatches[i];
-                    const newButton = buttonMatch.match.replace(
+                    const elementMatch = buttonMatches[i];
+                    const newElement = elementMatch.match.replace(
                         />/,
                         ` data-nodewire-id="${componentId}" data-nodewire-component="${component.name}">`
                     );
                     
-                    html = html.substring(0, buttonMatch.index) + 
-                           newButton + 
-                           html.substring(buttonMatch.index + buttonMatch.match.length);
+                    html = html.substring(0, elementMatch.index) + 
+                           newElement + 
+                           html.substring(elementMatch.index + elementMatch.match.length);
                     
-                    console.log(`[NodeWire] ✅ Marcando botón con data-nw-click para componente ${component.name}`);
+                    console.log(`[NodeWire] ✅ Marcando elemento con data-nw-event para componente ${component.name}`);
                     markedCount++;
                 }
             }

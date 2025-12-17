@@ -59,6 +59,9 @@ export class BladeParser {
         // Procesar @include
         currentContent = this.processIncludes(currentContent, viewsPath);
 
+        // Procesar atributos de eventos (click), (keyup), etc. -> data-nw-event
+        currentContent = this.processEventAttributes(currentContent);
+
         // Procesar directivas NodeWire (@nodewireState, @wire)
         currentContent = this.processNodeWireDirectives(currentContent);
 
@@ -370,6 +373,24 @@ export class BladeParser {
         }
 
         return processed;
+    }
+
+    /**
+     * Procesa atributos de eventos con sintaxis (evento)="metodo"
+     * Los convierte a data-nw-event="evento" data-nw-method="metodo"
+     * Soporta todos los eventos HTML estándar
+     */
+    private processEventAttributes(content: string): string {
+        // Buscar atributos con formato (evento)="metodo" o (evento)='metodo'
+        // El patrón busca: (evento) seguido de = y luego comillas con el método
+        // Soporta espacios opcionales alrededor del =
+        // Captura nombres de eventos que pueden tener guiones (ej: touch-start)
+        const eventAttributeRegex = /\(([a-zA-Z][a-zA-Z0-9-]*)\)\s*=\s*["']([^"']+)["']/g;
+        
+        return content.replace(eventAttributeRegex, (match, eventName, method) => {
+            // Convertir a data-nw-event y data-nw-method
+            return `data-nw-event="${eventName}" data-nw-method="${method}"`;
+        });
     }
 
     private processNodeWireDirectives(content: string): string {

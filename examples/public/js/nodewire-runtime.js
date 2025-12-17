@@ -26,8 +26,31 @@ class NodeWireRuntime {
         // Intentar conectar por WebSocket
         this.connectWebSocket();
         
-        // Interceptar eventos de click
-        document.addEventListener('click', this.handleClick.bind(this));
+        // Lista de eventos HTML estándar a escuchar
+        const events = [
+            // Mouse events
+            'click', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout', 
+            'mousemove', 'mouseenter', 'mouseleave', 'contextmenu',
+            // Keyboard events
+            'keydown', 'keyup', 'keypress',
+            // Form events
+            'submit', 'change', 'input', 'focus', 'blur', 'select',
+            // Drag events
+            'drag', 'dragstart', 'dragend', 'dragover', 'dragenter', 'dragleave', 'drop',
+            // Touch events
+            'touchstart', 'touchend', 'touchmove', 'touchcancel',
+            // Media events
+            'play', 'pause', 'ended', 'load', 'error',
+            // Window events
+            'resize', 'scroll',
+            // Other common events
+            'wheel', 'copy', 'cut', 'paste'
+        ];
+        
+        // Interceptar todos los eventos usando delegación de eventos
+        events.forEach(eventType => {
+            document.addEventListener(eventType, this.handleEvent.bind(this), true);
+        });
     }
 
     /**
@@ -98,12 +121,20 @@ class NodeWireRuntime {
     }
 
     /**
-     * Maneja los eventos de click en elementos con data-nw-click
+     * Maneja todos los eventos en elementos con data-nw-event
      */
-    handleClick(e) {
+    handleEvent(e) {
         const target = e.target;
-        const method = target.getAttribute('data-nw-click');
+        const eventType = target.getAttribute('data-nw-event');
+        const method = target.getAttribute('data-nw-method');
         
+        // Si no tiene data-nw-event, no es un evento NodeWire
+        if (!eventType) return;
+        
+        // Verificar que el tipo de evento coincida con el evento que se disparó
+        if (eventType !== e.type) return;
+        
+        // Si no tiene método, no hacer nada
         if (!method) return;
 
         e.preventDefault();
