@@ -2,6 +2,7 @@ import { Component } from 'framework-mvc-nodewire';
 
 export class CounterComponent extends Component {
     public count: number = 0;
+    public view: string = 'components/counter';
 
     constructor(initialValue: number = 0, id?: string) {
         super('CounterComponent', id);
@@ -22,10 +23,6 @@ export class CounterComponent extends Component {
     public reset(): void {
         this.count = 0;
         console.log(`[NodeWire] Contador reseteado`);
-    }
-
-    public render(templateEngine: any): string {
-        return templateEngine.render('components/counter', { component: this });
     }
 }
 

@@ -1,8 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
 
-export abstract class Component {
+export class Component {
     public id: string;
     public readonly name: string;
+    /**
+     * Ruta de la vista del componente (ej: 'components/counter')
+     * Si no se define, se usa components/{nombre-sin-Component}
+     */
+    public view?: string;
 
     constructor(name: string, id?: string) {
         this.id = id || uuidv4();
@@ -11,10 +16,21 @@ export abstract class Component {
 
     /**
      * Renderiza el componente usando el motor de plantillas
-     * @param templateEngine Motor de plantillas (EJS)
-     * @returns HTML renderizado del componente
+     * Inyecta automáticamente el estado inicial del componente para el runtime.
      */
-    public abstract render(templateEngine: any): string;
+    public render(templateEngine: any): string {
+        // Resolver la vista: usar propiedad view o fallback components/{nombreSinSuffix}
+        const fallbackView = `components/${this.name.toLowerCase().replace(/component$/, '')}`;
+        const viewPath = this.view || fallbackView;
+
+        const html = templateEngine.render(viewPath, { component: this });
+
+        // Inyectar estado inicial para el runtime
+        const stateJson = JSON.stringify(this.getState());
+        const stateScript = `<script type="application/json" data-nodewire-state="${this.id}" data-component-name="${this.name}">${stateJson}</script>`;
+
+        return `${stateScript}${html}`;
+    }
 
     /**
      * Obtiene el estado público del componente que se sincronizará con el cliente
