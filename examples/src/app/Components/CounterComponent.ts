@@ -8,8 +8,9 @@ export class CounterComponent extends Component {
         this.count = initialValue;
     }
 
-    public increment(): void {
-        this.count += 1;
+    public increment(value: number = 1): void {
+        console.log('increment', value);
+        this.count += value;
         console.log(`[NodeWire] Contador incrementado a ${this.count}`);
     }
 

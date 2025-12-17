@@ -27,7 +27,7 @@
         </button>
         
         <button 
-            (click)="increment"
+            (click)="increment(5)"
             (mouseover)="increment"
             style="padding: 12px 24px; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s;"
             onmouseover="this.style.transform='scale(1.05)'"

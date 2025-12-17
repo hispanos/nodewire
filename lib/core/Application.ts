@@ -63,7 +63,7 @@ export class Application {
         // Exponer NodeWireManager y BladeEngine en app.locals para que los controladores puedan acceder
         this.app.locals.nodeWireManager = this.nodeWireManager;
         this.app.locals.bladeEngine = this.bladeEngine;
-        
+
         // Configurar NodeWireManager con BladeEngine si aún no está configurado
         if (!(this.nodeWireManager as any).bladeEngine && this.bladeEngine) {
             this.nodeWireManager.setBladeEngine(this.bladeEngine);
@@ -90,9 +90,9 @@ export class Application {
                     // Renderizar la vista primero con BladeEngine
                     if (!this.bladeEngine) {
                         const err = new Error('BladeEngine no está disponible');
-                        if (callback) callback(err, '');
-                        return;
-                    }
+                            if (callback) callback(err, '');
+                            return;
+                        }
                     
                     try {
                         const viewHtml = this.bladeEngine.render(viewToRender, viewData);
@@ -251,9 +251,9 @@ export class Application {
                         // Renderizar el layout con BladeEngine
                         if (!this.bladeEngine) {
                             const err = new Error('BladeEngine no está disponible');
-                            if (callback) callback(err, '');
-                            return;
-                        }
+                                if (callback) callback(err, '');
+                                return;
+                            }
                         
                         try {
                             let layoutHtml = this.bladeEngine.render(`layouts/${layout.name}`, layoutData);
@@ -291,18 +291,18 @@ export class Application {
                                     processedHtml = this.nodeWireManager.autoMarkComponentProperties(processedHtml, component);
                                 }
                                 
-                            if (callback) {
+                                if (callback) {
                                 callback(null as any, processedHtml);
+                                } else {
+                                    res.send(processedHtml);
+                                }
                             } else {
-                                res.send(processedHtml);
-                            }
-                        } else {
                             if (callback) callback(null as any, '');
                         }
                     } catch (layoutErr: any) {
                         console.error(`[Layout] Error renderizando layout ${layout.name}:`, layoutErr);
                         if (callback) callback(layoutErr, '');
-                    }
+                            }
                 } catch (viewErr: any) {
                     console.error(`[Layout] Error renderizando vista ${viewToRender}:`, viewErr);
                     if (callback) callback(viewErr, '');
@@ -316,11 +316,11 @@ export class Application {
                     }
                     
                     try {
-                        const viewData = {
-                            ...data,
-                            _nodeWireManager: this.nodeWireManager,
-                            _viewsPath: this.config.viewsPath
-                        };
+                    const viewData = {
+                        ...data,
+                        _nodeWireManager: this.nodeWireManager,
+                        _viewsPath: this.config.viewsPath
+                    };
                         
                         let html = this.bladeEngine.render(view, viewData);
                         
@@ -368,12 +368,13 @@ export class Application {
         // Endpoint HTTP para compatibilidad (fallback)
         this.app.post('/nodewire/call', async (req: Request, res: Response) => {
             try {
-                const { id, component, method, state } = req.body;
+                const { id, component, method, args = [], state } = req.body;
                 
                 const result = await this.nodeWireManager.handleComponentCall(
                     id,
                     component,
                     method,
+                    args,
                     state,
                     this.config.viewsPath
                 );
@@ -405,12 +406,13 @@ export class Application {
             ws.on('message', async (message: string) => {
                 try {
                     const data = JSON.parse(message.toString());
-                    const { id, component, method, state, requestId } = data;
+                    const { id, component, method, args = [], state, requestId } = data;
 
                     const result = await this.nodeWireManager.handleComponentCall(
                         id,
                         component,
                         method,
+                        args,
                         state,
                         this.config.viewsPath
                     );

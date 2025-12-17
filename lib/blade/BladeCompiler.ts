@@ -112,7 +112,7 @@ export class BladeCompiler {
                     parts.push({ type: 'text', value: text });
                 }
             }
-            
+
             // Buscar el cierre de la expresión manejando llaves anidadas
             let depth = 0;
             let exprStart = startIndex + 2; // Después de ${
@@ -129,7 +129,7 @@ export class BladeCompiler {
                         break;
                     }
                     depth--;
-                }
+        }
             }
             
             if (exprEnd > exprStart) {
@@ -140,8 +140,8 @@ export class BladeCompiler {
             } else {
                 // No se encontró el cierre, tratar como texto
                 const text = content.substring(startIndex);
-                if (text) {
-                    parts.push({ type: 'text', value: text });
+            if (text) {
+                parts.push({ type: 'text', value: text });
                 }
                 break;
             }

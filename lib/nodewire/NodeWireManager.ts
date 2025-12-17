@@ -162,6 +162,7 @@ export class NodeWireManager {
         id: string,
         componentName: string,
         method: string,
+        args: any[] = [],
         state: Record<string, any>,
         viewsPath?: string
     ): Promise<{ success: boolean; html?: string; error?: string; newState?: Record<string, any>; updates?: Record<string, any> }> {
@@ -238,7 +239,7 @@ export class NodeWireManager {
                 throw new Error(`Método ${method} no existe en ${componentName}`);
             }
 
-            await (component as any)[method]();
+            await (component as any)[method](...args);
 
             // Obtener el nuevo estado
             const newState = component.getState();
