@@ -24,7 +24,9 @@
     @endif
 
     @foreach (users as user)
-        @component(counterComponent1, { initialValue: user.id })
+        @component('counterComponent1', { initialValue: user.id })
+        <p>{{ user.name }}</p>
+        @endcomponent
     @endforeach
     
     <!-- Usar componente directamente por variable -->

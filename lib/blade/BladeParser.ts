@@ -323,6 +323,9 @@ export class BladeParser {
         // Agregar el texto restante
         result += content.substring(lastIndex);
         
+        // Eliminar cualquier @endcomponent que quede sin procesar (deberían haberse eliminado en processComponents)
+        result = result.replace(/@endcomponent/g, '');
+        
         // Procesar @endforeach - cerrar el loop
         result = result.replace(/@endforeach/g, `\`;});}return html;})()}`);
         
